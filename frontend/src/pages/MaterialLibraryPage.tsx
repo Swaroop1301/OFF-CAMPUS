@@ -1,8 +1,15 @@
 import { motion } from 'framer-motion'
-import { Search, Filter } from 'lucide-react'
-import { useState } from 'react'
+import { Search, Filter, RefreshCw } from 'lucide-react'
+import { useState, useEffect } from 'react'
 
-const MATERIALS = [
+// Category → color mapping for material swatch
+const CATEGORY_COLORS: Record<string, string> = {
+  Masonry: '#A0826D', Structure: '#A0A0A0', Finish: '#D0C8BC', Insulation: '#B8D4E8',
+  Roofing: '#C0C0C0', Wood: '#C9A96E', Glazing: '#B8D8E8', Metal: '#C0C0C0', Traditional: '#A0826D',
+}
+
+// Hardcoded fallback catalog (used when backend is unreachable)
+const FALLBACK_MATERIALS = [
   { name: 'Brick (Common)', conductivity: 0.84, density: 1700, specific_heat: 800, category: 'Masonry', color: '#C4664A' },
   { name: 'Stone (Granite)', conductivity: 1.5, density: 2500, specific_heat: 900, category: 'Masonry', color: '#8B8680' },
   { name: 'Sandstone', conductivity: 1.7, density: 2200, specific_heat: 920, category: 'Masonry', color: '#D4A574' },
@@ -23,9 +30,37 @@ const MATERIALS = [
 export default function MaterialLibraryPage() {
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
+  const [materials, setMaterials] = useState(FALLBACK_MATERIALS)
+  const [source, setSource] = useState<'api' | 'fallback'>('fallback')
+  const [isLoading, setIsLoading] = useState(false)
 
-  const categories = [...new Set(MATERIALS.map((m) => m.category))]
-  const filtered = MATERIALS.filter((m) => {
+  const fetchMaterials = async () => {
+    setIsLoading(true)
+    try {
+      const res = await fetch('/api/v1/materials')
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      const mapped = data.map((m: any) => ({
+        name: m.name,
+        conductivity: m.conductivity,
+        density: m.density,
+        specific_heat: m.specific_heat,
+        category: m.category,
+        color: CATEGORY_COLORS[m.category] || '#A0A0A0',
+      }))
+      setMaterials(mapped)
+      setSource('api')
+    } catch {
+      setMaterials(FALLBACK_MATERIALS)
+      setSource('fallback')
+    }
+    setIsLoading(false)
+  }
+
+  useEffect(() => { fetchMaterials() }, [])
+
+  const categories = [...new Set(materials.map((m) => m.category))]
+  const filtered = materials.filter((m) => {
     if (search && !m.name.toLowerCase().includes(search.toLowerCase())) return false
     if (categoryFilter && m.category !== categoryFilter) return false
     return true
@@ -40,7 +75,16 @@ export default function MaterialLibraryPage() {
             Thermal properties database for construction materials
           </p>
         </div>
-        <span className="chip chip-demo">DEMO DATA</span>
+        <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+          <button className="btn btn-ghost" onClick={fetchMaterials} disabled={isLoading} style={{ padding: '0.375rem' }}>
+            <RefreshCw size={14} className={isLoading ? 'animate-pulse-soft' : ''} />
+          </button>
+          {source === 'api' ? (
+            <span className="chip" style={{ background: 'var(--color-comfort-100)', color: 'var(--color-comfort-700)', fontWeight: 600 }}>API CATALOG</span>
+          ) : (
+            <span className="chip chip-demo">OFFLINE</span>
+          )}
+        </div>
       </div>
 
       {/* Search and filters */}

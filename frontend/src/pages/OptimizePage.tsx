@@ -42,8 +42,86 @@ export default function OptimizePage() {
   const [maxBudget, setMaxBudget] = useState(500000)
   const [minComfort, setMinComfort] = useState(75)
 
+  // Engine state
+  const [isRunningEngine, setIsRunningEngine] = useState(false)
+  const [engineResults, setEngineResults] = useState<any>(null)
+  const [dataSource, setDataSource] = useState<'local' | 'engine'>('local')
+
+  // Run real optimization via backend API
+  const runEngineOptimization = async () => {
+    setIsRunningEngine(true)
+    try {
+      const totalW = energyWeight + comfortWeight + costWeight || 1
+      const payload = {
+        base_scenario: {
+          scenario_id: scenario.id,
+          length_m: scenario.geometry.length,
+          width_m: scenario.geometry.width,
+          height_m: scenario.geometry.height,
+          roof_pitch_deg: scenario.geometry.roof_pitch,
+          orientation_deg: scenario.geometry.orientation,
+          elevation_m: scenario.location.elevation,
+          wall_layers: scenario.envelope.wall_layers.map((l) => ({
+            name: l.name, thickness_mm: l.thickness_mm,
+            conductivity: l.conductivity, density: l.density, specific_heat: l.specific_heat,
+          })),
+          roof_layers: scenario.envelope.roof_layers.map((l) => ({
+            name: l.name, thickness_mm: l.thickness_mm,
+            conductivity: l.conductivity, density: l.density, specific_heat: l.specific_heat,
+          })),
+          occupants: scenario.operating.occupants,
+          metabolic_rate_w: scenario.operating.metabolic_rate,
+          internal_gains_w: scenario.operating.internal_gains,
+          hvac_mode: scenario.operating.hvac_mode,
+          target_temp_c: scenario.operating.target_temp,
+          comfort_band_c: scenario.operating.comfort_band,
+          ach_natural: scenario.operating.ach_natural,
+          ach_infiltration: scenario.operating.ach_infiltration,
+          duration_hours: 72,
+          base_outdoor_temp_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 35 : -10,
+          temp_swing_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 8 : 5,
+          peak_solar_ghi: scenario.location.elevation > 2000 ? 500 : 400,
+        },
+        w_energy: energyWeight / totalW,
+        w_comfort: comfortWeight / totalW,
+        w_cost: costWeight / totalW,
+        max_candidates: 24,
+      }
+      const res = await fetch('/api/v1/optimization/sweep', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      const data = await res.json()
+      setEngineResults(data)
+      setDataSource('engine')
+    } catch (err) {
+      console.error('Engine optimization failed:', err)
+    }
+    setIsRunningEngine(false)
+  }
+
   // Parametric candidate pool (deterministic sweep)
   const candidates: CandidateDesign[] = useMemo(() => {
+    // If we have engine results, map them to CandidateDesign format
+    if (engineResults && engineResults.candidates) {
+      return engineResults.candidates.map((c: any, i: number) => ({
+        id: i + 1,
+        name: c.design_id || `Engine Config #${i + 1}`,
+        insulation_mm: (c.parameters?.insulation_thickness_m || 0.1) * 1000,
+        wwr_pct: 20,
+        glazing_type: c.parameters?.window_u_value <= 1.4 ? 'Triple Low-E' : c.parameters?.window_u_value <= 2.8 ? 'Double Low-E' : 'Single',
+        orientation_deg: 180,
+        annual_heating_kwh: Math.round(c.energy_kwh * 365 / 3), // Scale 72h → annual
+        comfort_score: Math.round(c.comfort_percentage),
+        capital_cost_inr: Math.round(c.estimated_cost_factor * 350000),
+        is_pareto: c.is_pareto_optimal,
+        composite_score: parseFloat((c.score * 100).toFixed(1)),
+      })).sort((a: CandidateDesign, b: CandidateDesign) => b.composite_score - a.composite_score)
+    }
+
+    // Fallback: local hardcoded candidates
     const raw: CandidateDesign[] = [
       { id: 1, name: 'Config #1: Standard High-Altitude', insulation_mm: 50, wwr_pct: 15, glazing_type: 'Double Clear', orientation_deg: 180, annual_heating_kwh: 4200, comfort_score: 72, capital_cost_inr: 340000, is_pareto: false, composite_score: 0 },
       { id: 2, name: 'Config #2: Solar Direct Gain', insulation_mm: 100, wwr_pct: 30, glazing_type: 'Double Low-E', orientation_deg: 175, annual_heating_kwh: 2850, comfort_score: 84, capital_cost_inr: 410000, is_pareto: true, composite_score: 0 },
@@ -62,17 +140,13 @@ export default function OptimizePage() {
     const wCost = costWeight / totalW
 
     return raw.map((c) => {
-      // Normalization: lower heating is better (1800 - 5600)
       const normEnergy = Math.max(0, 1 - (c.annual_heating_kwh - 1800) / (5600 - 1800))
-      // Comfort: higher is better (50 - 100)
       const normComfort = (c.comfort_score - 50) / 50
-      // Cost: lower is better (250k - 550k)
       const normCost = Math.max(0, 1 - (c.capital_cost_inr - 250000) / (550000 - 250000))
-
       const score = (normEnergy * wE + normComfort * wComf + normCost * wCost) * 100
       return { ...c, composite_score: parseFloat(score.toFixed(1)) }
     }).sort((a, b) => b.composite_score - a.composite_score)
-  }, [energyWeight, comfortWeight, costWeight])
+  }, [energyWeight, comfortWeight, costWeight, engineResults])
 
   const filteredCandidates = candidates.filter(
     (c) => c.capital_cost_inr <= maxBudget && c.comfort_score >= minComfort
@@ -91,13 +165,34 @@ export default function OptimizePage() {
           <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
             Parametric Sweep ({candidates.length} Envelope Permutations)
           </span>
+          {dataSource === 'engine' ? (
+            <span className="chip" style={{ background: 'var(--color-comfort-100)', color: 'var(--color-comfort-700)', fontWeight: 600 }}>LIVE ENGINE</span>
+          ) : (
+            <span className="chip chip-demo">LOCAL PREVIEW</span>
+          )}
         </div>
-        <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
-          Envelope Optimization & Trade-Off Analysis
-        </h1>
-        <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9375rem', maxWidth: '850px' }}>
-          Multi-objective optimization balancing annual heating load, occupant thermal comfort satisfaction, and capital expenditure. Pure physics-driven Pareto extraction without black-box heuristics.
-        </p>
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', flexWrap: 'wrap', gap: '1rem' }}>
+          <div>
+            <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '2rem', fontWeight: 600, color: 'var(--color-text-primary)' }}>
+              Envelope Optimization & Trade-Off Analysis
+            </h1>
+            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.9375rem', maxWidth: '850px' }}>
+              Multi-objective optimization balancing annual heating load, occupant thermal comfort satisfaction, and capital expenditure. Pure physics-driven Pareto extraction without black-box heuristics.
+            </p>
+          </div>
+          <button
+            className="btn btn-solar"
+            onClick={runEngineOptimization}
+            disabled={isRunningEngine}
+            style={{ whiteSpace: 'nowrap', padding: '0.75rem 1.5rem' }}
+          >
+            {isRunningEngine ? (
+              <><RefreshCw size={14} className="animate-pulse-soft" /> Running Engine…</>
+            ) : (
+              <><Sparkles size={14} /> Run Engine Sweep</>
+            )}
+          </button>
+        </div>
       </div>
 
       {/* Top Section: Weight Sliders & Constraints */}

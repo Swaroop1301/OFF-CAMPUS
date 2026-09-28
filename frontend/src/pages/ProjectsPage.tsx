@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { Plus, Thermometer, MapPin, Clock, MoreHorizontal, Trash2 } from 'lucide-react'
@@ -37,7 +37,32 @@ const DEMO_PROJECTS = [
 ]
 
 export default function ProjectsPage() {
-  const [projects] = useState(DEMO_PROJECTS)
+  const [projects, setProjects] = useState(DEMO_PROJECTS)
+
+  useEffect(() => {
+    (async () => {
+      try {
+        const res = await fetch('/api/v1/projects')
+        if (!res.ok) return
+        const apiProjects = await res.json()
+        // Merge API presets with local demo projects (avoid duplicates by id)
+        const localIds = new Set(DEMO_PROJECTS.map((p) => p.id))
+        const apiMapped = apiProjects
+          .filter((p: any) => !localIds.has(p.id))
+          .map((p: any) => ({
+            id: p.id,
+            name: p.name,
+            description: p.description,
+            location: `${p.location?.name} (${p.location?.latitude?.toFixed(2)}°N, ${p.location?.longitude?.toFixed(2)}°E)`,
+            scenarios: 1,
+            lastModified: 'preset',
+            status: 'active',
+            climate: p.location?.climate_zone || 'Unknown',
+          }))
+        setProjects([...DEMO_PROJECTS, ...apiMapped])
+      } catch { /* keep local defaults */ }
+    })()
+  }, [])
 
   return (
     <div style={{ maxWidth: '960px', margin: '0 auto' }}>

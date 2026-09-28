@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState } from 'react'
 import { Cloud, RefreshCw, AlertTriangle, Database } from 'lucide-react'
 import { useScenarioStore } from '@/stores/appStore'
 
@@ -7,9 +7,9 @@ export default function ClimateIntelligencePage() {
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'fallback'>('cached')
   const [isLoading, setIsLoading] = useState(false)
 
-  // Generate demo climate data
+  // Generate initial demo climate data
   const hours = 72
-  const data = useMemo(() => {
+  const generateDemoData = () => {
     const ts = Array.from({ length: hours }, (_, h) => `${String(h % 24).padStart(2, '0')}:00`)
     return {
       timestamps: ts,
@@ -21,16 +21,50 @@ export default function ClimateIntelligencePage() {
         return hr >= 6 && hr <= 18 ? Math.max(0, 400 * Math.sin(Math.PI * (hr - 6) / 12) + Math.random() * 20) : 0
       }),
     }
-  }, [])
+  }
+
+  const [data, setData] = useState(generateDemoData)
 
   const handleFetch = async () => {
     setIsLoading(true)
     try {
       const res = await fetch(`/api/v1/climate/power?lat=${scenario.location.latitude}&lon=${scenario.location.longitude}&start=20240115&end=20240117&params=T2M,RH2M,WS10M,ALLSKY_SFC_SW_DWN`)
       const json = await res.json()
+
+      // Determine data source
       if (json._cache?.is_fallback) setDataSource('fallback')
       else if (json._cache?.hit) setDataSource('cached')
       else setDataSource('live')
+
+      // Parse the NASA POWER response into chart-ready arrays
+      if (json.properties?.parameter) {
+        const params = json.properties.parameter
+        const t2m = params.T2M || {}
+        const rh2m = params.RH2M || {}
+        const ws10m = params.WS10M || {}
+        const ghi = params.ALLSKY_SFC_SW_DWN || {}
+
+        const keys = Object.keys(t2m).sort()
+        if (keys.length > 0) {
+          setData({
+            timestamps: keys.map((k) => k.slice(-4).replace(/(\d{2})(\d{2})/, '$1:$2')),
+            temperature: keys.map((k) => t2m[k] ?? 0),
+            humidity: keys.map((k) => rh2m[k] ?? 0),
+            wind: keys.map((k) => ws10m[k] ?? 0),
+            solar: keys.map((k) => ghi[k] ?? 0),
+          })
+        }
+      } else if (json.temperature_c) {
+        // Fallback data format from our backend
+        const n = json.temperature_c.length
+        setData({
+          timestamps: Array.from({ length: n }, (_, h) => `${String(h % 24).padStart(2, '0')}:00`),
+          temperature: json.temperature_c,
+          humidity: json.relative_humidity || data.humidity,
+          wind: json.wind_speed_ms || data.wind,
+          solar: json.solar_ghi || data.solar,
+        })
+      }
     } catch {
       setDataSource('fallback')
     }
