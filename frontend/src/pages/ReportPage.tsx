@@ -194,35 +194,54 @@ export default function ReportPage() {
         </div>
 
         {/* Section 1: Executive Summary */}
-        {includeExecutive && (
-          <div style={{ marginBottom: '2.5rem' }}>
-            <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 600, borderBottom: '1px solid var(--color-border-subtle)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
-              1. Executive Summary
-            </h3>
-            <p style={{ fontSize: '0.9rem', lineHeight: 1.6, color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
-              This technical assessment certifies the envelope performance for a {scenario.geometry.length}m × {scenario.geometry.width}m × {scenario.geometry.height}m shelter designed for {scenario.location.climate_zone} conditions. Transient 4R2C lumped-parameter simulation indicates an auxiliary heating demand of <strong>38.6 kWh</strong> over the critical 72-hour design cold wave, maintaining operative temperatures within acceptable ASHRAE 55 adaptive comfort bands for <strong>75%</strong> of occupied hours.
-            </p>
+        {includeExecutive && (() => {
+          const wallU = 1 / (scenario.envelope.wall_layers.reduce((s, l) => s + (l.thickness_mm / 1000) / (l.conductivity || 0.001), 0) + 0.17)
+          const roofU = 1 / (scenario.envelope.roof_layers.reduce((s, l) => s + (l.thickness_mm / 1000) / (l.conductivity || 0.001), 0) + 0.14)
+          const meanIndoor = results?.indoor_temp_c && results.indoor_temp_c.length > 0
+            ? (results.indoor_temp_c.reduce((a: number, b: number) => a + b, 0) / results.indoor_temp_c.length).toFixed(1)
+            : 'N/A'
 
-            <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', background: 'var(--color-bg-paper)', padding: '1rem', borderRadius: '6px' }}>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Wall Assembly U-Value</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>0.32 W/m²K</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Roof Assembly U-Value</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>0.24 W/m²K</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Peak HVAC Sizing</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>3.2 kW</div>
-              </div>
-              <div>
-                <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Mean Indoor Temp</div>
-                <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>17.2°C</div>
-              </div>
+          return (
+            <div style={{ marginBottom: '2.5rem' }}>
+              <h3 style={{ fontFamily: 'var(--font-display)', fontSize: '1.25rem', fontWeight: 600, borderBottom: '1px solid var(--color-border-subtle)', paddingBottom: '0.5rem', marginBottom: '1rem' }}>
+                1. Executive Summary
+              </h3>
+              {results ? (
+                <>
+                  <p style={{ fontSize: '0.9rem', lineHeight: 1.6, color: 'var(--color-text-secondary)', marginBottom: '1.25rem' }}>
+                    This technical assessment certifies the envelope performance for a {scenario.geometry.length}m × {scenario.geometry.width}m × {scenario.geometry.height}m shelter designed for {scenario.location.climate_zone} conditions at {scenario.location.elevation}m altitude. Transient 3R2C physics simulation indicates an auxiliary heating demand of <strong>{results.heat_balance?.heating_energy_kwh || 0} kWh</strong> over the {results.simulation_hours || 72}-hour design cold wave, maintaining operative temperatures within comfort limits for <strong>{results.comfort?.comfort_percentage || 0}%</strong> of occupied hours.
+                  </p>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(4, 1fr)', gap: '1rem', background: 'var(--color-bg-paper)', padding: '1rem', borderRadius: '6px' }}>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Wall Assembly U-Value</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>{wallU.toFixed(2)} W/m²K</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Roof Assembly U-Value</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>{roofU.toFixed(2)} W/m²K</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Peak Heating Load</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>{((results.peak_heating_load_w || 0) / 1000).toFixed(2)} kW</div>
+                    </div>
+                    <div>
+                      <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>Mean Indoor Temp</div>
+                      <div style={{ fontFamily: 'var(--font-mono)', fontSize: '1.15rem', fontWeight: 700 }}>{meanIndoor}°C</div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <div style={{ padding: '1rem', background: 'var(--color-bg-paper)', borderRadius: '6px', fontSize: '0.85rem', color: 'var(--color-text-secondary)' }}>
+                  No transient simulation has been executed yet for this active scenario. Run a simulation in the <strong>Simulation Console</strong> to compute auxiliary energy demand and PMV indices.
+                  <div style={{ marginTop: '0.75rem', display: 'flex', gap: '1.5rem', fontFamily: 'var(--font-mono)' }}>
+                    <span>Calculated Wall U-Value: <strong>{wallU.toFixed(2)} W/m²K</strong></span>
+                    <span>Calculated Roof U-Value: <strong>{roofU.toFixed(2)} W/m²K</strong></span>
+                  </div>
+                </div>
+              )}
             </div>
-          </div>
-        )}
+          )
+        })()}
 
         {/* Section 2: Climate Profile */}
         {includeClimate && (
@@ -233,20 +252,20 @@ export default function ReportPage() {
             <table style={{ width: '100%', fontSize: '0.85rem', borderCollapse: 'collapse' }}>
               <tbody>
                 <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Location & Coordinates</td>
+                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{scenario.location.name} ({scenario.location.latitude.toFixed(2)}°N, {scenario.location.longitude.toFixed(2)}°E)</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
+                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Site Elevation</td>
+                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{scenario.location.elevation} m ASL ({scenario.location.elevation_source || 'provider'})</td>
+                </tr>
+                <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
                   <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Climate Classification</td>
-                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{scenario.location.climate_zone} (High-Altitude Steppe)</td>
+                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>{scenario.location.climate_zone} (ECBC / NBC 2016)</td>
                 </tr>
                 <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Design Extreme Outdoor Temp</td>
-                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>-15.0°C (99.6% Heating Design Day)</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Solar Irradiance (Clear-Sky Peak GHI)</td>
-                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>880 W/m² (High UV / Low Atmospheric Scattering)</td>
-                </tr>
-                <tr style={{ borderBottom: '1px solid var(--color-border-subtle)' }}>
-                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Diurnal Temperature Swing</td>
-                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>18.4°C amplitude</td>
+                  <td style={{ padding: '0.5rem 0', color: 'var(--color-text-secondary)' }}>Meteorological Data Source</td>
+                  <td style={{ padding: '0.5rem 0', fontFamily: 'var(--font-mono)', fontWeight: 600 }}>NASA POWER Surface Meteorology & Solar Point API</td>
                 </tr>
               </tbody>
             </table>

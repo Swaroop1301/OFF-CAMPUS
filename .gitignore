@@ -29,6 +29,8 @@ htmlcov/
 *.db
 *.sqlite
 *.sqlite3
+storage/
+backend/storage/
 
 # Environment Variables & Secrets
 .env

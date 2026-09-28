@@ -1,4 +1,4 @@
-import { useState, useMemo } from 'react'
+import { useState, useMemo, useEffect } from 'react'
 import { motion } from 'framer-motion'
 import { 
   Sliders, 
@@ -102,51 +102,31 @@ export default function OptimizePage() {
     setIsRunningEngine(false)
   }
 
-  // Parametric candidate pool (deterministic sweep)
+  // Automatically execute physics optimization sweep on mount
+  useEffect(() => {
+    runEngineOptimization()
+  }, [])
+
+  // Parametric candidate pool (deterministic sweep from live engine)
   const candidates: CandidateDesign[] = useMemo(() => {
-    // If we have engine results, map them to CandidateDesign format
-    if (engineResults && engineResults.candidates) {
-      return engineResults.candidates.map((c: any, i: number) => ({
-        id: i + 1,
-        name: c.design_id || `Engine Config #${i + 1}`,
-        insulation_mm: (c.parameters?.insulation_thickness_m || 0.1) * 1000,
-        wwr_pct: 20,
-        glazing_type: c.parameters?.window_u_value <= 1.4 ? 'Triple Low-E' : c.parameters?.window_u_value <= 2.8 ? 'Double Low-E' : 'Single',
-        orientation_deg: 180,
-        annual_heating_kwh: Math.round(c.energy_kwh * 365 / 3), // Scale 72h → annual
-        comfort_score: Math.round(c.comfort_percentage),
-        capital_cost_inr: Math.round(c.estimated_cost_factor * 350000),
-        is_pareto: c.is_pareto_optimal,
-        composite_score: parseFloat((c.score * 100).toFixed(1)),
-      })).sort((a: CandidateDesign, b: CandidateDesign) => b.composite_score - a.composite_score)
+    if (!engineResults || !engineResults.candidates) {
+      return []
     }
 
-    // Fallback: local hardcoded candidates
-    const raw: CandidateDesign[] = [
-      { id: 1, name: 'Config #1: Standard High-Altitude', insulation_mm: 50, wwr_pct: 15, glazing_type: 'Double Clear', orientation_deg: 180, annual_heating_kwh: 4200, comfort_score: 72, capital_cost_inr: 340000, is_pareto: false, composite_score: 0 },
-      { id: 2, name: 'Config #2: Solar Direct Gain', insulation_mm: 100, wwr_pct: 30, glazing_type: 'Double Low-E', orientation_deg: 175, annual_heating_kwh: 2850, comfort_score: 84, capital_cost_inr: 410000, is_pareto: true, composite_score: 0 },
-      { id: 3, name: 'Config #3: Deep Cold Insulation', insulation_mm: 180, wwr_pct: 12, glazing_type: 'Triple Low-E Ar', orientation_deg: 180, annual_heating_kwh: 2100, comfort_score: 93, capital_cost_inr: 485000, is_pareto: true, composite_score: 0 },
-      { id: 4, name: 'Config #4: Balanced Hybrid', insulation_mm: 120, wwr_pct: 22, glazing_type: 'Triple Clear', orientation_deg: 185, annual_heating_kwh: 2540, comfort_score: 88, capital_cost_inr: 435000, is_pareto: true, composite_score: 0 },
-      { id: 5, name: 'Config #5: Economy Masonry', insulation_mm: 40, wwr_pct: 10, glazing_type: 'Single Glass', orientation_deg: 150, annual_heating_kwh: 5600, comfort_score: 58, capital_cost_inr: 275000, is_pareto: false, composite_score: 0 },
-      { id: 6, name: 'Config #6: Ultra-Passive Ladakh', insulation_mm: 200, wwr_pct: 25, glazing_type: 'Triple Low-E Ar', orientation_deg: 180, annual_heating_kwh: 1820, comfort_score: 96, capital_cost_inr: 530000, is_pareto: true, composite_score: 0 },
-      { id: 7, name: 'Config #7: Compact Low-WWR', insulation_mm: 80, wwr_pct: 8, glazing_type: 'Double Low-E', orientation_deg: 180, annual_heating_kwh: 3400, comfort_score: 79, capital_cost_inr: 365000, is_pareto: false, composite_score: 0 },
-      { id: 8, name: 'Config #8: Super-Glazed South', insulation_mm: 140, wwr_pct: 35, glazing_type: 'Triple Low-E Ar', orientation_deg: 180, annual_heating_kwh: 2290, comfort_score: 90, capital_cost_inr: 470000, is_pareto: true, composite_score: 0 },
-    ]
-
-    // Score computation: deterministic weighted rank
-    const totalW = energyWeight + comfortWeight + costWeight || 1
-    const wE = energyWeight / totalW
-    const wComf = comfortWeight / totalW
-    const wCost = costWeight / totalW
-
-    return raw.map((c) => {
-      const normEnergy = Math.max(0, 1 - (c.annual_heating_kwh - 1800) / (5600 - 1800))
-      const normComfort = (c.comfort_score - 50) / 50
-      const normCost = Math.max(0, 1 - (c.capital_cost_inr - 250000) / (550000 - 250000))
-      const score = (normEnergy * wE + normComfort * wComf + normCost * wCost) * 100
-      return { ...c, composite_score: parseFloat(score.toFixed(1)) }
-    }).sort((a, b) => b.composite_score - a.composite_score)
-  }, [energyWeight, comfortWeight, costWeight, engineResults])
+    return engineResults.candidates.map((c: any, i: number) => ({
+      id: i + 1,
+      name: c.design_id || `Physics Config #${i + 1}`,
+      insulation_mm: Math.round((c.parameters?.insulation_thickness_m || 0.1) * 1000),
+      wwr_pct: Math.round((c.parameters?.window_to_wall_ratio || 0.2) * 100),
+      glazing_type: c.parameters?.window_u_value <= 1.4 ? 'Triple Low-E' : c.parameters?.window_u_value <= 2.8 ? 'Double Low-E' : 'Single',
+      orientation_deg: Math.round(c.parameters?.orientation_deg || 180),
+      annual_heating_kwh: Math.round((c.energy_kwh || 0) * (365 / 3)), // 72h scaled to annual
+      comfort_score: Math.round(c.comfort_percentage || 0),
+      capital_cost_inr: Math.round((c.estimated_cost_factor || 1.0) * 350000),
+      is_pareto: Boolean(c.is_pareto_optimal),
+      composite_score: parseFloat(((c.score || 0) * 100).toFixed(1)),
+    })).sort((a: CandidateDesign, b: CandidateDesign) => b.composite_score - a.composite_score)
+  }, [engineResults])
 
   const filteredCandidates = candidates.filter(
     (c) => c.capital_cost_inr <= maxBudget && c.comfort_score >= minComfort

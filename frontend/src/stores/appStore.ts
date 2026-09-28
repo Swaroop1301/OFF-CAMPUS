@@ -34,6 +34,12 @@ export interface ScenarioLocation {
   longitude: number
   elevation: number
   climate_zone: string
+  city?: string
+  district?: string
+  state?: string
+  country?: string
+  timezone?: string
+  elevation_source?: string
 }
 
 export interface ScenarioGeometry {
