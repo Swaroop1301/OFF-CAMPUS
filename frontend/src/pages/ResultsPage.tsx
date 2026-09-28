@@ -74,7 +74,11 @@ export default function ResultsPage() {
             {scenario.location.name} · {results.indoor_temp_c.length}h transient simulation
           </p>
         </div>
-        <span className="chip chip-demo">DEMO DATA</span>
+        {results.simulation_hours ? (
+          <span className="chip" style={{ background: 'var(--color-comfort-100)', color: 'var(--color-comfort-700)', fontWeight: 600 }}>LIVE ENGINE</span>
+        ) : (
+          <span className="chip chip-demo">DEMO DATA</span>
+        )}
       </div>
 
       {/* Hero metrics */}

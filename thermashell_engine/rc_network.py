@@ -145,8 +145,8 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
             ts = datetime(2024, 1, 15, i % 24, 0, 0)
 
         # ── Solar radiation ─────────────────────────────────────────────
-        latitude = 34.15  # Default Leh — will be parameterized later
-        longitude = 77.58
+        latitude = getattr(geo, "latitude", 34.15)
+        longitude = getattr(geo, "longitude", 77.58)
         alt, az = compute_solar_position(latitude, longitude, ts)
 
         wall_solar = solar_irradiance_on_walls(

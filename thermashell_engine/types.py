@@ -46,6 +46,8 @@ class ShelterGeometry(BaseModel):
     roof_pitch_deg: float = Field(default=15.0, ge=0, le=60, description="Roof pitch in degrees")
     orientation_deg: float = Field(default=0.0, ge=0, lt=360, description="Orientation: 0=N, 90=E, 180=S, 270=W")
     elevation_m: float = Field(default=0.0, ge=0, description="Site elevation above sea level in meters")
+    latitude: float = Field(default=34.15, ge=-90, le=90, description="Site latitude in degrees N")
+    longitude: float = Field(default=77.58, ge=-180, le=180, description="Site longitude in degrees E")
 
     @property
     def floor_area(self) -> float:

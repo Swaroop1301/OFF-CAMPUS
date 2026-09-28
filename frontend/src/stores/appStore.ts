@@ -34,6 +34,12 @@ export interface ScenarioLocation {
   longitude: number
   elevation: number
   climate_zone: string
+  city?: string
+  district?: string
+  state?: string
+  country?: string
+  timezone?: string
+  elevation_source?: string
 }
 
 export interface ScenarioGeometry {
@@ -249,48 +255,106 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   results: null,
 
   startSimulation: () => {
+    const scenarioState = useScenarioStore.getState().scenario
+    const jobId = `sim-${Date.now()}`
+
     set({
-      jobId: `sim-${Date.now()}`,
+      jobId,
       status: 'running',
       stages: DEFAULT_STAGES.map((s) => ({ ...s })),
       overallProgress: 0,
       results: null,
     })
 
-    // Simulate progressive stages (demo mode — in production this comes from WebSocket)
-    const stages = ['climate', 'solar', 'thermal', 'ventilation', 'comfort', 'results']
-    stages.forEach((stage, i) => {
-      setTimeout(() => {
-        set((s) => {
-          const newStages = s.stages.map((st) => {
-            if (st.name === stage) return { ...st, status: 'running' as const, progress: 50 }
-            return st
-          })
-          return { stages: newStages, overallProgress: ((i) / stages.length) * 100 }
-        })
-      }, (i + 1) * 800)
+    // Build the payload from the current scenario in Zustand
+    const payload = buildSimulationPayload(scenarioState)
 
-      setTimeout(() => {
-        set((s) => {
-          const newStages = s.stages.map((st) => {
-            if (st.name === stage) return { ...st, status: 'completed' as const, progress: 100 }
-            return st
-          })
-          const allDone = newStages.every((st) => st.status === 'completed')
-          return {
-            stages: newStages,
-            overallProgress: ((i + 1) / stages.length) * 100,
-            status: allDone ? 'completed' : s.status,
+    // Map WebSocket stage names to UI stage names
+    const WS_STAGE_MAP: Record<string, { uiStages: string[]; progress: number }> = {
+      CLIMATE_INGEST: { uiStages: ['climate'], progress: 15 },
+      RC_MATRIX_BUILD: { uiStages: ['solar', 'thermal'], progress: 35 },
+      SOLVER_INTEGRATION: { uiStages: ['thermal', 'ventilation'], progress: 75 },
+      COMFORT_EVAL: { uiStages: ['comfort'], progress: 90 },
+      CONVERGENCE_CHECK: { uiStages: ['results'], progress: 100 },
+    }
+
+    // Try WebSocket first, fall back to HTTP POST
+    const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
+    const wsUrl = `${wsProtocol}//${window.location.hostname}:${window.location.port}/api/v1/simulations/ws`
+
+    let wsConnected = false
+
+    try {
+      const ws = new WebSocket(wsUrl)
+
+      const wsTimeout = setTimeout(() => {
+        if (!wsConnected) {
+          ws.close()
+          runHttpFallback(payload, set)
+        }
+      }, 3000)
+
+      ws.onopen = () => {
+        wsConnected = true
+        clearTimeout(wsTimeout)
+        ws.send(JSON.stringify(payload))
+      }
+
+      ws.onmessage = (event) => {
+        try {
+          const msg = JSON.parse(event.data)
+
+          if (msg.type === 'PROGRESS') {
+            const mapping = WS_STAGE_MAP[msg.stage]
+            if (mapping) {
+              set((s) => {
+                const newStages = s.stages.map((st) => {
+                  if (mapping.uiStages.includes(st.name)) {
+                    return { ...st, status: 'running' as const, progress: msg.progress }
+                  }
+                  // Mark earlier stages as completed
+                  const stageOrder = ['climate', 'solar', 'thermal', 'ventilation', 'comfort', 'results']
+                  const currentIdx = Math.min(...mapping.uiStages.map((u) => stageOrder.indexOf(u)))
+                  const thisIdx = stageOrder.indexOf(st.name)
+                  if (thisIdx < currentIdx && st.status !== 'completed') {
+                    return { ...st, status: 'completed' as const, progress: 100 }
+                  }
+                  return st
+                })
+                return { stages: newStages, overallProgress: mapping.progress }
+              })
+            }
+          } else if (msg.type === 'COMPLETED') {
+            set((s) => ({
+              stages: s.stages.map((st) => ({ ...st, status: 'completed' as const, progress: 100 })),
+              overallProgress: 100,
+              results: msg.result,
+              status: 'completed',
+            }))
+            ws.close()
+          } else if (msg.type === 'ERROR') {
+            console.error('Simulation error from backend:', msg.error)
+            set({ status: 'failed' })
+            ws.close()
           }
-        })
-      }, (i + 1) * 800 + 600)
-    })
+        } catch (parseErr) {
+          console.error('Failed to parse WS message:', parseErr)
+        }
+      }
 
-    // Generate demo results after all stages complete
-    setTimeout(() => {
-      const demoResults = generateDemoResults()
-      set({ results: demoResults, status: 'completed' })
-    }, stages.length * 800 + 1200)
+      ws.onerror = () => {
+        if (!wsConnected) {
+          clearTimeout(wsTimeout)
+          runHttpFallback(payload, set)
+        }
+      }
+
+      ws.onclose = () => {
+        // If never completed successfully, the state is already set
+      }
+    } catch {
+      runHttpFallback(payload, set)
+    }
   },
 
   updateStage: (name, update) =>
@@ -302,48 +366,120 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
   resetSimulation: () => set({ jobId: null, status: 'idle', stages: DEFAULT_STAGES.map((s) => ({ ...s })), overallProgress: 0, results: null }),
 }))
 
-function generateDemoResults() {
-  const hours = 72
-  const timestamps = Array.from({ length: hours }, (_, h) => `2024-01-${15 + Math.floor(h / 24)}T${String(h % 24).padStart(2, '0')}:00:00`)
-  const outdoor = timestamps.map((_, h) => parseFloat((-10 + 5 * Math.sin(2 * Math.PI * h / 24 - Math.PI / 2)).toFixed(1)))
-  const indoor = timestamps.map((_, h) => parseFloat((16 + 2.5 * Math.sin(2 * Math.PI * h / 24 - Math.PI / 3) + Math.random() * 0.5).toFixed(1)))
-  const solar = timestamps.map((_, h) => {
-    const hr = h % 24
-    return hr >= 6 && hr <= 18 ? parseFloat((400 * Math.sin(Math.PI * (hr - 6) / 12)).toFixed(0)) : 0
-  })
-
+/**
+ * Build the RunSimulationPayload from the Zustand ScenarioData.
+ * Maps Zustand store fields to backend API contract.
+ */
+function buildSimulationPayload(scenario: ScenarioData) {
   return {
-    timestamps,
-    indoor_temp_c: indoor,
-    outdoor_temp_c: outdoor,
-    operative_temp_c: indoor.map((t) => t - 0.5),
-    solar_ghi: solar,
-    q_conduction_walls: indoor.map((t, i) => parseFloat((2.1 * 36 * (t - outdoor[i])).toFixed(1))),
-    q_conduction_roof: indoor.map((t, i) => parseFloat((0.3 * 24 * (t - outdoor[i])).toFixed(1))),
-    q_solar_gain: solar.map((s) => parseFloat((s * 0.65 * 2.4 * 0.3).toFixed(1))),
-    q_ventilation: indoor.map((t, i) => parseFloat((0.5 * 72 * 1.225 * 1005 / 3600 * (t - outdoor[i])).toFixed(1))),
-    heat_balance: {
-      conduction_walls_kwh: 42.5,
-      conduction_roof_kwh: 8.2,
-      conduction_floor_kwh: 5.8,
-      conduction_windows_kwh: 12.3,
-      solar_gain_kwh: 18.7,
-      internal_gain_kwh: 28.8,
-      ventilation_kwh: 15.4,
-      heating_energy_kwh: 38.6,
-      cooling_energy_kwh: 0,
-    },
-    comfort: {
-      pmv_mean: -0.35,
-      ppd_mean: 12.8,
-      comfort_hours: 54,
-      total_hours: 72,
-      comfort_percentage: 75.0,
-      operative_temp_mean_c: 17.2,
-      hours_below_comfort: 14,
-      hours_above_comfort: 4,
-    },
-    peak_heating_load_w: 3200,
-    peak_cooling_load_w: 0,
+    scenario_id: scenario.id,
+    length_m: scenario.geometry.length,
+    width_m: scenario.geometry.width,
+    height_m: scenario.geometry.height,
+    roof_pitch_deg: scenario.geometry.roof_pitch,
+    orientation_deg: scenario.geometry.orientation,
+    elevation_m: scenario.location.elevation,
+    wall_layers: scenario.envelope.wall_layers.map((l) => ({
+      name: l.name,
+      thickness_mm: l.thickness_mm,
+      conductivity: l.conductivity,
+      density: l.density,
+      specific_heat: l.specific_heat,
+    })),
+    roof_layers: scenario.envelope.roof_layers.map((l) => ({
+      name: l.name,
+      thickness_mm: l.thickness_mm,
+      conductivity: l.conductivity,
+      density: l.density,
+      specific_heat: l.specific_heat,
+    })),
+    floor_layers: scenario.envelope.floor_layers.map((l) => ({
+      name: l.name,
+      thickness_mm: l.thickness_mm,
+      conductivity: l.conductivity,
+      density: l.density,
+      specific_heat: l.specific_heat,
+    })),
+    openings: scenario.envelope.windows.map((w) => ({
+      name: `Window (${w.face})`,
+      width_m: w.width,
+      height_m: w.height,
+      wall_face: w.face,
+      u_value: w.u_value,
+      shgc: w.shgc,
+      count: w.count,
+    })),
+    occupants: scenario.operating.occupants,
+    metabolic_rate_w: scenario.operating.metabolic_rate,
+    internal_gains_w: scenario.operating.internal_gains,
+    hvac_mode: scenario.operating.hvac_mode,
+    target_temp_c: scenario.operating.target_temp,
+    comfort_band_c: scenario.operating.comfort_band,
+    ach_natural: scenario.operating.ach_natural,
+    ach_infiltration: scenario.operating.ach_infiltration,
+    duration_hours: 72,
+    base_outdoor_temp_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 35 : -10,
+    temp_swing_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 8 : 5,
+    peak_solar_ghi: scenario.location.elevation > 2000 ? 500 : 400,
+  }
+}
+
+/**
+ * HTTP POST fallback when WebSocket is unavailable.
+ * Animates UI progress stages progressively, then calls the sync endpoint.
+ */
+async function runHttpFallback(
+  payload: ReturnType<typeof buildSimulationPayload>,
+  set: (fn: (s: SimulationState) => Partial<SimulationState>) => void
+) {
+  const uiStages = ['climate', 'solar', 'thermal', 'ventilation', 'comfort', 'results']
+
+  // Animate stages while we wait for the HTTP response
+  const animationPromise = (async () => {
+    for (let i = 0; i < uiStages.length - 1; i++) {
+      await new Promise((r) => setTimeout(r, 400))
+      set((s) => {
+        const newStages = s.stages.map((st) => {
+          if (st.name === uiStages[i]) return { ...st, status: 'running' as const, progress: 50 }
+          return st
+        })
+        return { stages: newStages, overallProgress: ((i + 1) / uiStages.length) * 100 }
+      })
+      await new Promise((r) => setTimeout(r, 300))
+      set((s) => {
+        const newStages = s.stages.map((st) => {
+          if (st.name === uiStages[i]) return { ...st, status: 'completed' as const, progress: 100 }
+          return st
+        })
+        return { stages: newStages }
+      })
+    }
+  })()
+
+  try {
+    const response = await fetch('/api/v1/simulations/run', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    })
+
+    if (!response.ok) {
+      const errText = await response.text()
+      throw new Error(`Simulation HTTP error ${response.status}: ${errText}`)
+    }
+
+    const result = await response.json()
+    await animationPromise // Ensure animation finishes before showing results
+
+    set((s) => ({
+      stages: s.stages.map((st) => ({ ...st, status: 'completed' as const, progress: 100 })),
+      overallProgress: 100,
+      results: result,
+      status: 'completed',
+    }))
+  } catch (err) {
+    console.error('HTTP simulation fallback failed:', err)
+    await animationPromise
+    set(() => ({ status: 'failed' }))
   }
 }

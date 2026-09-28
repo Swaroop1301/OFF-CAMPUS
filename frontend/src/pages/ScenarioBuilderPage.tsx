@@ -1,6 +1,7 @@
 import { useState, useMemo, useCallback } from 'react'
 import { useScenarioStore, useUIStore } from '@/stores/appStore'
 import { MapPin, Ruler, Layers, Wind, Target, Play, Check, Info, ChevronDown, ChevronUp } from 'lucide-react'
+import LocationMap from '@/components/LocationMap'
 
 const WIZARD_STEPS = [
   { key: 'site', label: 'Site', icon: MapPin, color: 'var(--color-climate-600)' },
@@ -134,7 +135,7 @@ export default function ScenarioBuilderPage() {
               </div>
               <UnitInput label="Latitude" value={scenario.location.latitude} unit="°N" onChange={(v) => updateLocation({ latitude: v })} min={-90} max={90} step={0.01} />
               <UnitInput label="Longitude" value={scenario.location.longitude} unit="°E" onChange={(v) => updateLocation({ longitude: v })} min={-180} max={180} step={0.01} />
-              <UnitInput label="Elevation" value={scenario.location.elevation} unit="m" onChange={(v) => updateLocation({ elevation: v })} min={0} max={9000} />
+              <UnitInput label="Elevation" value={scenario.location.elevation} unit="m" onChange={(v) => updateLocation({ elevation: v, elevation_source: 'user' })} min={0} max={9000} />
             </div>
           )}
 
@@ -235,61 +236,73 @@ export default function ScenarioBuilderPage() {
           </div>
         </div>
 
-        {/* Center: 3D preview placeholder */}
+        {/* Center: Interactive Location Map on Site step, Live Shelter Preview on others */}
         <div className="card" style={{ minHeight: '500px', display: 'flex', flexDirection: 'column' }}>
-          <h5 style={{ marginBottom: '1rem' }}>Live Shelter Preview</h5>
-          <div style={{
-            flex: 1, background: 'var(--color-bg-paper-warm)', borderRadius: 'var(--radius-md)',
-            display: 'flex', alignItems: 'center', justifyContent: 'center',
-            border: '1px solid var(--color-border-light)', position: 'relative', overflow: 'hidden', minHeight: '400px',
-          }}>
-            {/* Isometric SVG shelter */}
-            <svg viewBox="0 0 400 300" style={{ width: '100%', maxHeight: '100%' }}>
-              <g transform="translate(200, 250)">
-                {/* Ground plane */}
-                <ellipse cx="0" cy="-10" rx="150" ry="40" fill="var(--color-comfort-50)" stroke="var(--color-comfort-200)" strokeWidth="0.5" />
-                {/* Floor */}
-                <polygon
-                  points={`0,-30 ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8} 0,-${30 + scenario.geometry.width * 16} -${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8}`}
-                  fill="var(--color-structure-100)" stroke="var(--color-structure-400)" strokeWidth="1.5"
-                />
-                {/* Left wall */}
-                <polygon
-                  points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8} -${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16}`}
-                  fill="var(--color-structure-200)" stroke="var(--color-structure-500)" strokeWidth="1.5"
-                />
-                {/* Right wall */}
-                <polygon
-                  points={`0,-${30 + scenario.geometry.width * 16} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8}`}
-                  fill="var(--color-structure-100)" stroke="var(--color-structure-400)" strokeWidth="1.5"
-                />
-                {/* Roof */}
-                {scenario.geometry.roof_type === 'gable' ? (
-                  <>
+          <h5 style={{ marginBottom: '1rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+            <span>{activeWizardStep === 0 ? 'Interactive Site & Geolocation Engine' : 'Live Shelter Preview'}</span>
+            {activeWizardStep === 0 && (
+              <span className="badge badge-climate" style={{ fontSize: '0.7rem' }}>
+                Leaflet / OpenStreetMap
+              </span>
+            )}
+          </h5>
+
+          {activeWizardStep === 0 ? (
+            <LocationMap height="460px" />
+          ) : (
+            <div style={{
+              flex: 1, background: 'var(--color-bg-paper-warm)', borderRadius: 'var(--radius-md)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+              border: '1px solid var(--color-border-light)', position: 'relative', overflow: 'hidden', minHeight: '400px',
+            }}>
+              {/* Isometric SVG shelter */}
+              <svg viewBox="0 0 400 300" style={{ width: '100%', maxHeight: '100%' }}>
+                <g transform="translate(200, 250)">
+                  {/* Ground plane */}
+                  <ellipse cx="0" cy="-10" rx="150" ry="40" fill="var(--color-comfort-50)" stroke="var(--color-comfort-200)" strokeWidth="0.5" />
+                  {/* Floor */}
+                  <polygon
+                    points={`0,-30 ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8} 0,-${30 + scenario.geometry.width * 16} -${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8}`}
+                    fill="var(--color-structure-100)" stroke="var(--color-structure-400)" strokeWidth="1.5"
+                  />
+                  {/* Left wall */}
+                  <polygon
+                    points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8} -${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16}`}
+                    fill="var(--color-structure-200)" stroke="var(--color-structure-500)" strokeWidth="1.5"
+                  />
+                  {/* Right wall */}
+                  <polygon
+                    points={`0,-${30 + scenario.geometry.width * 16} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8}`}
+                    fill="var(--color-structure-100)" stroke="var(--color-structure-400)" strokeWidth="1.5"
+                  />
+                  {/* Roof */}
+                  {scenario.geometry.roof_type === 'gable' ? (
+                    <>
+                      <polygon
+                        points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20 + 15} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20}`}
+                        fill="var(--color-heat-100)" stroke="var(--color-heat-400)" strokeWidth="1.5"
+                      />
+                      <polygon
+                        points={`0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20 + 15} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20}`}
+                        fill="var(--color-heat-50)" stroke="var(--color-heat-400)" strokeWidth="1.5"
+                      />
+                    </>
+                  ) : (
                     <polygon
-                      points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20 + 15} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20}`}
+                      points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20}`}
                       fill="var(--color-heat-100)" stroke="var(--color-heat-400)" strokeWidth="1.5"
                     />
-                    <polygon
-                      points={`0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20 + 15} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20}`}
-                      fill="var(--color-heat-50)" stroke="var(--color-heat-400)" strokeWidth="1.5"
-                    />
-                  </>
-                ) : (
-                  <polygon
-                    points={`-${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20} 0,-${30 + scenario.geometry.width * 16 + scenario.geometry.height * 20} ${scenario.geometry.length * 15},-${30 + scenario.geometry.width * 8 + scenario.geometry.height * 20}`}
-                    fill="var(--color-heat-100)" stroke="var(--color-heat-400)" strokeWidth="1.5"
-                  />
-                )}
-                {/* Compass */}
-                <g transform="translate(140, -230)">
-                  <circle cx="0" cy="0" r="12" fill="var(--color-bg-card)" stroke="var(--color-border)" strokeWidth="0.5" />
-                  <line x1="0" y1="8" x2="0" y2="-8" stroke="var(--color-warning-500)" strokeWidth="1" />
-                  <text x="0" y="-12" fontSize="6" fill="var(--color-warning-600)" fontWeight="700" textAnchor="middle">N</text>
+                  )}
+                  {/* Compass */}
+                  <g transform="translate(140, -230)">
+                    <circle cx="0" cy="0" r="12" fill="var(--color-bg-card)" stroke="var(--color-border)" strokeWidth="0.5" />
+                    <line x1="0" y1="8" x2="0" y2="-8" stroke="var(--color-warning-500)" strokeWidth="1" />
+                    <text x="0" y="-12" fontSize="6" fill="var(--color-warning-600)" fontWeight="700" textAnchor="middle">N</text>
+                  </g>
                 </g>
-              </g>
-            </svg>
-          </div>
+              </svg>
+            </div>
+          )}
         </div>
 
         {/* Right: Engineering summary */}

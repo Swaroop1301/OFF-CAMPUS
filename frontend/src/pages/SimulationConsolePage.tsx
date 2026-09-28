@@ -73,6 +73,19 @@ export default function SimulationConsolePage() {
             </div>
           </div>
         )}
+        {status === 'failed' && (
+          <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'center', gap: '1rem' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', color: 'var(--color-warning-600)' }}>
+              <AlertCircle size={20} /> <span style={{ fontFamily: 'var(--font-mono)', fontSize: '1rem' }}>Simulation Failed</span>
+            </div>
+            <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', textAlign: 'center', maxWidth: '400px' }}>
+              The thermal engine encountered an error. Check the backend console for details.
+            </p>
+            <button className="btn btn-solar" onClick={() => { resetSimulation(); startSimulation() }}>
+              <Zap size={16} /> Retry Simulation
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Overall progress bar */}

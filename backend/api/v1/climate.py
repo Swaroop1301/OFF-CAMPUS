@@ -1,14 +1,13 @@
 """
-Climate data API endpoint — proxies NASA POWER with caching.
-
-GET /api/v1/climate/power?lat=...&lon=...&start=...&end=...&params=...
+Climate data API endpoint — proxies NASA POWER with validation and PostgreSQL caching.
 """
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, HTTPException
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from database import get_db
 from services.climate_service import fetch_climate_data
+from exceptions import ClimateSourceUnavailable
 
 router = APIRouter()
 
@@ -20,29 +19,32 @@ async def get_climate_data(
     start: str = Query(..., min_length=8, max_length=8, description="Start date YYYYMMDD"),
     end: str = Query(..., min_length=8, max_length=8, description="End date YYYYMMDD"),
     params: str = Query(
-        default="T2M,RH2M,WS10M,ALLSKY_SFC_SW_DWN",
-        description="Comma-separated NASA POWER parameters (max 15)"
+        default="T2M,RH2M,WS10M,ALLSKY_SFC_SW_DWN,PS",
+        description="Comma-separated NASA POWER parameters"
     ),
     community: str = Query(default="SB", description="NASA POWER community: SB, RE, AG"),
+    refresh: bool = Query(default=False, description="Force fresh download bypassing cache"),
     db: AsyncSession = Depends(get_db),
 ):
     """
-    Fetch hourly climate data from NASA POWER.
-
-    Responses include a `_cache` object indicating:
-    - `hit`: whether this was served from cache
-    - `is_fallback`: whether demo/fallback data was used (NASA POWER unavailable)
-
-    When fallback is used, the `source` field clearly indicates:
-    "DEMO/FALLBACK — LEH-WINTER-72H (NASA POWER unavailable)"
+    Fetch hourly climate data from NASA POWER with physical validation and database persistence.
+    Returns:
+    - parameters: { T2M, RH2M, WS10M, ALLSKY_SFC_SW_DWN, PS }
+    - _cache: { hit: bool, source_state: 'LIVE' | 'CACHED', retrieved_at: str }
     """
-    data = await fetch_climate_data(
-        db=db,
-        latitude=lat,
-        longitude=lon,
-        start_date=start,
-        end_date=end,
-        parameters=params,
-        community=community,
-    )
-    return data
+    try:
+        data = await fetch_climate_data(
+            db=db,
+            latitude=lat,
+            longitude=lon,
+            start_date=start,
+            end_date=end,
+            parameters=params,
+            community=community,
+            force_refresh=refresh,
+        )
+        return data
+    except ClimateSourceUnavailable as exc:
+        raise HTTPException(status_code=503, detail=str(exc))
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Climate processing error: {str(exc)}")
