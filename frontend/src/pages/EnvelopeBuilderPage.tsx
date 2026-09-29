@@ -1,4 +1,5 @@
 import { useScenarioStore } from '@/stores/appStore'
+import { Link } from 'react-router-dom'
 import { GripVertical, Plus, Trash2, ArrowUpDown, Layers, ShieldCheck, X } from 'lucide-react'
 import { useState, useEffect } from 'react'
 
@@ -378,6 +379,24 @@ export default function EnvelopeBuilderPage() {
           </div>
         </div>
       )}
+
+      {/* Sequential Navigation */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem' }}>
+        <Link to={`/scenario/${scenario.id}/materials`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Materials Library
+        </Link>
+        <Link 
+          to={`/scenario/${scenario.id}/operating`} 
+          className="btn btn-primary" 
+          style={{ 
+            padding: '0.75rem 2rem',
+            pointerEvents: wall_layers.length > 0 && roof_layers.length > 0 ? 'auto' : 'none',
+            opacity: wall_layers.length > 0 && roof_layers.length > 0 ? 1 : 0.5
+          }}
+        >
+          Next: Operating Conditions →
+        </Link>
+      </div>
     </div>
   )
 }

@@ -7,11 +7,10 @@ from typing import List, Optional
 from datetime import datetime
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select, update
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
+import re
 
 from database import get_db
-from models import Material, MaterialVersion, CustomMaterial
 from thermashell_engine.types import MaterialLayer, WallAssembly
 from thermashell_engine.conduction import compute_r_value, compute_u_value, thermal_capacity_per_area
 
@@ -87,130 +86,112 @@ class AssemblyEvaluationResponse(BaseModel):
 async def list_materials(
     category: Optional[str] = Query(None, description="Filter by category"),
     search: Optional[str] = Query(None, description="Search by name"),
-    db: AsyncSession = Depends(get_db)
+    db: AsyncIOMotorDatabase = Depends(get_db)
 ):
     """Returns database-backed catalog of thermal construction materials."""
-    stmt = select(Material)
+    query = {}
     if category:
-        stmt = stmt.where(Material.category.ilike(category))
+        query["category"] = {"$regex": f"^{category}$", "$options": "i"}
     if search:
-        stmt = stmt.where(Material.name.ilike(f"%{search}%"))
+        query["name"] = {"$regex": search, "$options": "i"}
 
-    result = await db.execute(stmt)
-    mats = result.scalars().all()
+    cursor = db.materials.find(query)
+    mats = await cursor.to_list(length=1000)
 
     return [
         MaterialItem(
-            id=m.id,
-            name=m.name,
-            category=m.category,
-            description=m.description,
-            thermal_conductivity_k=m.thermal_conductivity_k,
-            density_rho=m.density_rho,
-            specific_heat_cp=m.specific_heat_cp,
-            emissivity=m.emissivity,
-            solar_absorptivity=m.solar_absorptivity,
-            solar_reflectivity=m.solar_reflectivity,
-            embodied_carbon=m.embodied_carbon,
-            cost=m.cost,
-            units=m.units,
-            source=m.source,
-            reference=m.reference,
-            valid_temperature_range=m.valid_temperature_range,
-            is_custom=bool(m.is_custom),
-            version=m.version
+            id=m.get("id", m.get("_id")),
+            name=m["name"],
+            category=m["category"],
+            description=m.get("description"),
+            thermal_conductivity_k=m["thermal_conductivity_k"],
+            density_rho=m["density_rho"],
+            specific_heat_cp=m["specific_heat_cp"],
+            emissivity=m.get("emissivity", 0.9),
+            solar_absorptivity=m.get("solar_absorptivity", 0.6),
+            solar_reflectivity=m.get("solar_reflectivity", 0.4),
+            embodied_carbon=m.get("embodied_carbon", 0.0),
+            cost=m.get("cost", 0.0),
+            units=m.get("units", "SI"),
+            source=m.get("source", ""),
+            reference=m.get("reference", ""),
+            valid_temperature_range=m.get("valid_temperature_range", ""),
+            is_custom=bool(m.get("is_custom")),
+            version=m.get("version", 1)
         )
         for m in mats
     ]
 
 
 @router.get("/{material_id}", response_model=MaterialItem)
-async def get_material(material_id: str, db: AsyncSession = Depends(get_db)):
+async def get_material(material_id: str, db: AsyncIOMotorDatabase = Depends(get_db)):
     """Fetch single material specifications from database."""
-    stmt = select(Material).where(Material.id == material_id)
-    result = await db.execute(stmt)
-    m = result.scalar_one_or_none()
+    m = await db.materials.find_one({"id": material_id})
+    if not m:
+        m = await db.materials.find_one({"_id": material_id})
     if not m:
         raise HTTPException(status_code=404, detail=f"Material '{material_id}' not found in database.")
 
     return MaterialItem(
-        id=m.id,
-        name=m.name,
-        category=m.category,
-        description=m.description,
-        thermal_conductivity_k=m.thermal_conductivity_k,
-        density_rho=m.density_rho,
-        specific_heat_cp=m.specific_heat_cp,
-        emissivity=m.emissivity,
-        solar_absorptivity=m.solar_absorptivity,
-        solar_reflectivity=m.solar_reflectivity,
-        embodied_carbon=m.embodied_carbon,
-        cost=m.cost,
-        units=m.units,
-        source=m.source,
-        reference=m.reference,
-        valid_temperature_range=m.valid_temperature_range,
-        is_custom=bool(m.is_custom),
-        version=m.version
+        id=m.get("id", m.get("_id")),
+        name=m["name"],
+        category=m["category"],
+        description=m.get("description"),
+        thermal_conductivity_k=m["thermal_conductivity_k"],
+        density_rho=m["density_rho"],
+        specific_heat_cp=m["specific_heat_cp"],
+        emissivity=m.get("emissivity", 0.9),
+        solar_absorptivity=m.get("solar_absorptivity", 0.6),
+        solar_reflectivity=m.get("solar_reflectivity", 0.4),
+        embodied_carbon=m.get("embodied_carbon", 0.0),
+        cost=m.get("cost", 0.0),
+        units=m.get("units", "SI"),
+        source=m.get("source", ""),
+        reference=m.get("reference", ""),
+        valid_temperature_range=m.get("valid_temperature_range", ""),
+        is_custom=bool(m.get("is_custom")),
+        version=m.get("version", 1)
     )
 
 
 @router.post("", response_model=MaterialItem)
-async def create_custom_material(req: CreateMaterialRequest, db: AsyncSession = Depends(get_db)):
-    """Add a new custom construction material to PostgreSQL."""
-    import re
+async def create_custom_material(req: CreateMaterialRequest, db: AsyncIOMotorDatabase = Depends(get_db)):
+    """Add a new custom construction material to MongoDB."""
     mat_id = req.id or re.sub(r'[^a-zA-Z0-9_-]', '-', req.name.lower().strip())
     mat_id = f"custom-{mat_id}" if not mat_id.startswith("custom-") else mat_id
 
     # Check existence
-    existing = await db.execute(select(Material).where(Material.id == mat_id))
-    if existing.scalar_one_or_none():
+    existing = await db.materials.find_one({"_id": mat_id})
+    if not existing:
+        existing = await db.materials.find_one({"id": mat_id})
+    if existing:
         mat_id = f"{mat_id}-{int(datetime.utcnow().timestamp())}"
 
-    new_mat = Material(
-        id=mat_id,
-        name=req.name,
-        category=req.category,
-        description=req.description,
-        thermal_conductivity_k=req.thermal_conductivity_k,
-        density_rho=req.density_rho,
-        specific_heat_cp=req.specific_heat_cp,
-        emissivity=req.emissivity,
-        solar_absorptivity=req.solar_absorptivity,
-        solar_reflectivity=req.solar_reflectivity,
-        embodied_carbon=req.embodied_carbon,
-        cost=req.cost,
-        units="SI (W/mK, kg/m³, J/kgK)",
-        source=req.source,
-        reference=req.reference,
-        valid_temperature_range="-40°C to 100°C",
-        is_custom=1,
-        version=1
-    )
-    db.add(new_mat)
-    await db.commit()
-    await db.refresh(new_mat)
+    new_mat = {
+        "_id": mat_id,
+        "id": mat_id,
+        "name": req.name,
+        "category": req.category,
+        "description": req.description,
+        "thermal_conductivity_k": req.thermal_conductivity_k,
+        "density_rho": req.density_rho,
+        "specific_heat_cp": req.specific_heat_cp,
+        "emissivity": req.emissivity,
+        "solar_absorptivity": req.solar_absorptivity,
+        "solar_reflectivity": req.solar_reflectivity,
+        "embodied_carbon": req.embodied_carbon,
+        "cost": req.cost,
+        "units": "SI (W/mK, kg/m³, J/kgK)",
+        "source": req.source,
+        "reference": req.reference,
+        "valid_temperature_range": "-40°C to 100°C",
+        "is_custom": 1,
+        "version": 1,
+        "created_at": datetime.utcnow()
+    }
+    await db.materials.insert_one(new_mat)
 
-    return MaterialItem(
-        id=new_mat.id,
-        name=new_mat.name,
-        category=new_mat.category,
-        description=new_mat.description,
-        thermal_conductivity_k=new_mat.thermal_conductivity_k,
-        density_rho=new_mat.density_rho,
-        specific_heat_cp=new_mat.specific_heat_cp,
-        emissivity=new_mat.emissivity,
-        solar_absorptivity=new_mat.solar_absorptivity,
-        solar_reflectivity=new_mat.solar_reflectivity,
-        embodied_carbon=new_mat.embodied_carbon,
-        cost=new_mat.cost,
-        units=new_mat.units,
-        source=new_mat.source,
-        reference=new_mat.reference,
-        valid_temperature_range=new_mat.valid_temperature_range,
-        is_custom=True,
-        version=1
-    )
+    return MaterialItem(**new_mat)
 
 
 @router.post("/evaluate", response_model=AssemblyEvaluationResponse)

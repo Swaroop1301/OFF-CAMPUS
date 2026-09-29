@@ -1,16 +1,18 @@
 import { useEffect, useRef, useState, useCallback } from 'react'
-import L from 'leaflet'
-import 'leaflet/dist/leaflet.css'
-import { Search, MapPin, Navigation, Mountain, Compass, RotateCcw, AlertTriangle, CheckCircle2 } from 'lucide-react'
+import * as maplibregl from 'maplibre-gl'
+import 'maplibre-gl/dist/maplibre-gl.css'
+import { 
+  Search, 
+  MapPin, 
+  Navigation, 
+  Mountain, 
+  RotateCcw, 
+  AlertTriangle, 
+  Layers, 
+  Globe2, 
+  ExternalLink 
+} from 'lucide-react'
 import { useScenarioStore } from '@/stores/appStore'
-
-// Fix Leaflet marker icons in Vite/bundler environments
-delete (L.Icon.Default.prototype as any)._getIconUrl
-L.Icon.Default.mergeOptions({
-  iconRetinaUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon-2x.png',
-  iconUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-icon.png',
-  shadowUrl: 'https://unpkg.com/leaflet@1.9.4/dist/images/marker-shadow.png',
-})
 
 interface SearchResult {
   name: string
@@ -22,12 +24,29 @@ interface SearchResult {
   climate_zone?: string
 }
 
-export default function LocationMap({ height = '380px' }: { height?: string }) {
+// Available styles directly hosted by OpenFreeMap (https://openfreemap.org/)
+const OPENFREEMAP_STYLES = [
+  { id: 'liberty', name: 'Liberty', url: 'https://tiles.openfreemap.org/styles/liberty', pitch: 0 },
+  { id: 'positron', name: 'Positron', url: 'https://tiles.openfreemap.org/styles/positron', pitch: 0 },
+  { id: 'bright', name: 'Bright', url: 'https://tiles.openfreemap.org/styles/bright', pitch: 0 },
+  { id: 'dark', name: 'Dark', url: 'https://tiles.openfreemap.org/styles/dark', pitch: 0 },
+  { id: 'fiord', name: 'Fiord', url: 'https://tiles.openfreemap.org/styles/fiord', pitch: 0 },
+]
+
+const QUICK_PRESETS = [
+  { name: 'Leh (Ladakh)', lat: 34.1526, lon: 77.5771, elev: 3500, zone: 'Cold Desert' },
+  { name: 'Shimla (HP)', lat: 31.1048, lon: 77.1734, elev: 2276, zone: 'Cold & Cloudy' },
+  { name: 'Srinagar (J&K)', lat: 34.0837, lon: 74.7973, elev: 1585, zone: 'Composite' },
+  { name: 'Jaisalmer (RJ)', lat: 26.9157, lon: 70.9083, elev: 225, zone: 'Hot & Dry' },
+]
+
+export default function LocationMap({ height = '460px' }: { height?: string }) {
   const { scenario, updateLocation } = useScenarioStore()
   const mapContainerRef = useRef<HTMLDivElement>(null)
-  const mapInstanceRef = useRef<L.Map | null>(null)
-  const markerRef = useRef<L.Marker | null>(null)
+  const mapInstanceRef = useRef<maplibregl.Map | null>(null)
+  const markerRef = useRef<maplibregl.Marker | null>(null)
 
+  const [activeStyle, setActiveStyle] = useState<string>('liberty')
   const [searchQuery, setSearchQuery] = useState('')
   const [suggestions, setSuggestions] = useState<SearchResult[]>([])
   const [isSearching, setIsSearching] = useState(false)
@@ -47,7 +66,7 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
       const data = await res.json()
 
       updateLocation({
-        name: preferredName || data.name || `${lat.toFixed(2)}°N, ${lon.toFixed(2)}°E`,
+        name: preferredName || data.name || `${lat.toFixed(4)}°N, ${lon.toFixed(4)}°E`,
         latitude: data.latitude,
         longitude: data.longitude,
         elevation: data.elevation_m,
@@ -67,46 +86,55 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
     }
   }, [updateLocation])
 
-  // Initialize Leaflet map
+  // Initialize MapLibre GL map powered by OpenFreeMap vector styles
   useEffect(() => {
     if (!mapContainerRef.current || mapInstanceRef.current) return
 
-    const initialLat = latitude || 34.15
-    const initialLon = longitude || 77.58
+    const initialLat = latitude || 34.1526
+    const initialLon = longitude || 77.5771
 
-    const map = L.map(mapContainerRef.current, {
-      center: [initialLat, initialLon],
-      zoom: 9,
-      zoomControl: true,
+    const map = new maplibregl.Map({
+      container: mapContainerRef.current,
+      style: 'https://tiles.openfreemap.org/styles/liberty',
+      center: [initialLon, initialLat],
+      zoom: 9.5,
+      pitch: 0,
       attributionControl: false,
     })
 
-    // CartoDB Positron / OSM tiles for crisp, scientific look
-    L.tileLayer('https://{s}.basemaps.cartocdn.com/light_all/{z}/{x}/{y}{r}.png', {
-      maxZoom: 19,
-      subdomains: 'abcd',
-    }).addTo(map)
+    // Add navigation controls (zoom, compass, pitch reset)
+    map.addControl(new maplibregl.NavigationControl({ visualizePitch: true }), 'top-right')
+    map.addControl(new maplibregl.ScaleControl({ unit: 'metric' }), 'bottom-left')
 
-    // Custom draggable marker
-    const marker = L.marker([initialLat, initialLon], {
+    // Create interactive draggable marker
+    const marker = new maplibregl.Marker({
       draggable: true,
-      autoPan: true,
-    }).addTo(map)
+      color: '#c0392b',
+    })
+      .setLngLat([initialLon, initialLat])
+      .addTo(map)
 
-    marker.bindPopup(`<strong>${name}</strong><br/>${initialLat.toFixed(4)}°N, ${initialLon.toFixed(4)}°E`)
+    const popup = new maplibregl.Popup({ offset: 25, closeButton: false })
+      .setHTML(`<div style="font-size: 11px; font-weight: 600;">${name || 'Site Location'}</div><div style="font-size: 10px; font-family: monospace;">${initialLat.toFixed(4)}°N, ${initialLon.toFixed(4)}°E</div>`)
 
+    marker.setPopup(popup)
+
+    // Handle marker drag
     marker.on('dragend', () => {
-      const pos = marker.getLatLng()
-      map.panTo(pos)
-      fetchLocationContext(parseFloat(pos.lat.toFixed(4)), parseFloat(pos.lng.toFixed(4)))
+      const lngLat = marker.getLngLat()
+      const cleanLat = parseFloat(lngLat.lat.toFixed(4))
+      const cleanLon = parseFloat(lngLat.lng.toFixed(4))
+      map.panTo([cleanLon, cleanLat])
+      fetchLocationContext(cleanLat, cleanLon)
     })
 
-    map.on('click', (e: L.LeafletMouseEvent) => {
-      const { lat, lng } = e.latlng
+    // Handle map click
+    map.on('click', (e: maplibregl.MapMouseEvent) => {
+      const { lng, lat } = e.lngLat
       const cleanLat = parseFloat(lat.toFixed(4))
       const cleanLon = parseFloat(lng.toFixed(4))
-      marker.setLatLng([cleanLat, cleanLon])
-      map.panTo([cleanLat, cleanLon])
+      marker.setLngLat([cleanLon, cleanLat])
+      map.panTo([cleanLon, cleanLat])
       fetchLocationContext(cleanLat, cleanLon)
     })
 
@@ -118,21 +146,39 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
       mapInstanceRef.current = null
       markerRef.current = null
     }
-  }, []) // mount once
+  }, []) // Mount once
 
   // Synchronize map & marker position when external store coordinates change
   useEffect(() => {
     if (mapInstanceRef.current && markerRef.current) {
-      const curPos = markerRef.current.getLatLng()
+      const curPos = markerRef.current.getLngLat()
       if (Math.abs(curPos.lat - latitude) > 0.001 || Math.abs(curPos.lng - longitude) > 0.001) {
-        markerRef.current.setLatLng([latitude, longitude])
-        mapInstanceRef.current.flyTo([latitude, longitude], Math.max(mapInstanceRef.current.getZoom(), 8), {
-          duration: 1.2,
+        markerRef.current.setLngLat([longitude, latitude])
+        mapInstanceRef.current.flyTo({
+          center: [longitude, latitude],
+          zoom: Math.max(mapInstanceRef.current.getZoom(), 8.5),
+          duration: 1200,
         })
-        markerRef.current.setPopupContent(`<strong>${name}</strong><br/>${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E`)
+        const popup = markerRef.current.getPopup()
+        if (popup) {
+          popup.setHTML(`<div style="font-size: 11px; font-weight: 600;">${name || 'Site Location'}</div><div style="font-size: 10px; font-family: monospace;">${latitude.toFixed(4)}°N, ${longitude.toFixed(4)}°E</div>`)
+        }
       }
     }
   }, [latitude, longitude, name])
+
+  // Style switcher
+  const handleStyleChange = (style: typeof OPENFREEMAP_STYLES[number]) => {
+    setActiveStyle(style.id)
+    if (mapInstanceRef.current) {
+      mapInstanceRef.current.setStyle(style.url)
+      if (style.pitch > 0) {
+        mapInstanceRef.current.easeTo({ pitch: style.pitch, duration: 800 })
+      } else {
+        mapInstanceRef.current.easeTo({ pitch: 0, duration: 800 })
+      }
+    }
+  }
 
   // Search input debouncer
   useEffect(() => {
@@ -166,28 +212,35 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
     setSearchQuery(item.name)
     setShowDropdown(false)
     if (mapInstanceRef.current && markerRef.current) {
-      mapInstanceRef.current.flyTo([item.latitude, item.longitude], 11, { duration: 1.2 })
-      markerRef.current.setLatLng([item.latitude, item.longitude])
+      mapInstanceRef.current.flyTo({
+        center: [item.longitude, item.latitude],
+        zoom: 11,
+        duration: 1200,
+      })
+      markerRef.current.setLngLat([item.longitude, item.latitude])
     }
     fetchLocationContext(item.latitude, item.longitude, item.name)
   }
 
-  // Reset to default
-  const handleResetLocation = () => {
-    const leh = { lat: 34.15, lon: 77.58, name: 'Leh, Ladakh', elev: 3500, zone: 'Cold Desert' }
+  // Apply a quick preset
+  const handleApplyPreset = (p: typeof QUICK_PRESETS[number]) => {
     if (mapInstanceRef.current && markerRef.current) {
-      mapInstanceRef.current.flyTo([leh.lat, leh.lon], 9, { duration: 1 })
-      markerRef.current.setLatLng([leh.lat, leh.lon])
+      mapInstanceRef.current.flyTo({
+        center: [p.lon, p.lat],
+        zoom: 9.5,
+        duration: 1000,
+      })
+      markerRef.current.setLngLat([p.lon, p.lat])
     }
-    fetchLocationContext(leh.lat, leh.lon, leh.name)
+    fetchLocationContext(p.lat, p.lon, p.name)
   }
 
   const isValidCoord = latitude >= -90 && latitude <= 90 && longitude >= -180 && longitude <= 180
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: '0.75rem', width: '100%' }}>
-      {/* Search Header Bar */}
-      <div style={{ position: 'relative', width: '100%' }}>
+      {/* Search Header Bar & Style Controls */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem', width: '100%' }}>
         <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
           <div style={{ position: 'relative', flex: 1 }}>
             <Search
@@ -204,7 +257,7 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
             <input
               type="text"
               className="input"
-              placeholder="Search site location (e.g. Leh, Jaisalmer, Shimla, Manali)..."
+              placeholder="Search site location (e.g. Leh, Shimla, Srinagar, Jaisalmer)..."
               value={searchQuery}
               onChange={(e) => setSearchQuery(e.target.value)}
               onFocus={() => suggestions.length > 0 && setShowDropdown(true)}
@@ -224,69 +277,122 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
                 searching…
               </span>
             )}
+
+            {/* Search Suggestions Dropdown */}
+            {showDropdown && suggestions.length > 0 && (
+              <div
+                style={{
+                  position: 'absolute',
+                  top: '100%',
+                  left: 0,
+                  right: 0,
+                  zIndex: 1000,
+                  marginTop: '4px',
+                  background: 'var(--color-bg-card)',
+                  border: '1px solid var(--color-border)',
+                  borderRadius: 'var(--radius-md)',
+                  boxShadow: 'var(--shadow-elevated)',
+                  maxHeight: '240px',
+                  overflowY: 'auto',
+                }}
+              >
+                {suggestions.map((item, idx) => (
+                  <div
+                    key={`${item.name}-${idx}`}
+                    onClick={() => handleSelectSuggestion(item)}
+                    style={{
+                      padding: '0.625rem 0.875rem',
+                      cursor: 'pointer',
+                      borderBottom: idx < suggestions.length - 1 ? '1px solid var(--color-border-light)' : 'none',
+                      display: 'flex',
+                      justifyContent: 'space-between',
+                      alignItems: 'center',
+                      fontSize: '0.8125rem',
+                      transition: 'background 0.1s ease',
+                    }}
+                    onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-paper-warm)')}
+                    onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+                  >
+                    <div>
+                      <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{item.name}</div>
+                      <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
+                        {item.region ? `${item.region}, ` : ''}{item.country} · {item.latitude.toFixed(2)}°N, {item.longitude.toFixed(2)}°E
+                      </div>
+                    </div>
+                    {item.elevation !== undefined && (
+                      <span className="chip" style={{ fontSize: '0.6875rem', background: 'var(--color-climate-50)', color: 'var(--color-climate-700)' }}>
+                        {item.elevation} m
+                      </span>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
 
           <button
             type="button"
             className="btn btn-outline"
-            onClick={handleResetLocation}
-            title="Reset to default reference site"
+            onClick={() => handleApplyPreset(QUICK_PRESETS[0])}
+            title="Reset to Leh reference site"
             style={{ padding: '0.45rem 0.75rem', fontSize: '0.75rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}
           >
             <RotateCcw size={13} /> Reset
           </button>
         </div>
 
-        {/* Search Suggestions Dropdown */}
-        {showDropdown && suggestions.length > 0 && (
-          <div
-            style={{
-              position: 'absolute',
-              top: '100%',
-              left: 0,
-              right: 0,
-              zIndex: 1000,
-              marginTop: '4px',
-              background: 'var(--color-bg-card)',
-              border: '1px solid var(--color-border)',
-              borderRadius: 'var(--radius-md)',
-              boxShadow: 'var(--shadow-elevated)',
-              maxHeight: '240px',
-              overflowY: 'auto',
-            }}
-          >
-            {suggestions.map((item, idx) => (
-              <div
-                key={`${item.name}-${idx}`}
-                onClick={() => handleSelectSuggestion(item)}
+        {/* OpenFreeMap Style Switcher & Quick Climate Presets Bar */}
+        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '0.5rem', fontSize: '0.75rem' }}>
+          {/* Style Selector */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--color-text-muted)', display: 'inline-flex', alignItems: 'center', gap: '0.25rem', fontWeight: 600, marginRight: '0.2rem' }}>
+              <Layers size={13} /> Style:
+            </span>
+            {OPENFREEMAP_STYLES.map((st) => (
+              <button
+                key={st.id}
+                type="button"
+                onClick={() => handleStyleChange(st)}
                 style={{
-                  padding: '0.625rem 0.875rem',
+                  padding: '0.2rem 0.55rem',
+                  borderRadius: '4px',
+                  border: activeStyle === st.id ? '1px solid var(--color-climate-600)' : '1px solid var(--color-border)',
+                  background: activeStyle === st.id ? 'var(--color-climate-50)' : 'var(--color-bg-paper)',
+                  color: activeStyle === st.id ? 'var(--color-climate-700)' : 'var(--color-text-secondary)',
+                  fontWeight: activeStyle === st.id ? 700 : 500,
+                  fontSize: '0.72rem',
                   cursor: 'pointer',
-                  borderBottom: idx < suggestions.length - 1 ? '1px solid var(--color-border-light)' : 'none',
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                  fontSize: '0.8125rem',
-                  transition: 'background 0.1s ease',
+                  transition: 'all 0.15s ease',
                 }}
-                onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--color-bg-paper-warm)')}
-                onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
               >
-                <div>
-                  <div style={{ fontWeight: 600, color: 'var(--color-text-primary)' }}>{item.name}</div>
-                  <div style={{ fontSize: '0.72rem', color: 'var(--color-text-muted)' }}>
-                    {item.region ? `${item.region}, ` : ''}{item.country} · {item.latitude.toFixed(2)}°N, {item.longitude.toFixed(2)}°E
-                  </div>
-                </div>
-                {item.elevation !== undefined && (
-                  <span className="chip" style={{ fontSize: '0.6875rem', background: 'var(--color-climate-50)', color: 'var(--color-climate-700)' }}>
-                    {item.elevation} m
-                  </span>
-                )}
-              </div>
+                {st.name}
+              </button>
             ))}
           </div>
-        )}
+
+          {/* Quick Presets */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.3rem', flexWrap: 'wrap' }}>
+            <span style={{ color: 'var(--color-text-muted)', fontSize: '0.7rem' }}>Presets:</span>
+            {QUICK_PRESETS.map((p) => (
+              <button
+                key={p.name}
+                type="button"
+                onClick={() => handleApplyPreset(p)}
+                style={{
+                  padding: '0.15rem 0.45rem',
+                  borderRadius: '3px',
+                  border: '1px solid var(--color-border-light)',
+                  background: 'var(--color-bg-card)',
+                  color: 'var(--color-text-primary)',
+                  fontSize: '0.68rem',
+                  cursor: 'pointer',
+                }}
+              >
+                {p.name.split(' ')[0]}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Interactive Map View */}
@@ -308,7 +414,7 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
             position: 'absolute',
             bottom: '10px',
             left: '10px',
-            zIndex: 500,
+            zIndex: 10,
             background: 'rgba(255, 255, 255, 0.94)',
             backdropFilter: 'blur(4px)',
             border: '1px solid var(--color-border)',
@@ -324,7 +430,7 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
           }}
         >
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
-            <MapPin size={12} color="var(--color-climate-600)" />
+            <MapPin size={12} color="var(--color-heat-600)" />
             {latitude.toFixed(4)}°, {longitude.toFixed(4)}°
           </span>
           <span style={{ display: 'flex', alignItems: 'center', gap: '0.25rem' }}>
@@ -336,23 +442,53 @@ export default function LocationMap({ height = '380px' }: { height?: string }) {
           </span>
         </div>
 
+        {/* OpenFreeMap Attribution Stamp */}
+        <div
+          style={{
+            position: 'absolute',
+            bottom: '0',
+            right: '0',
+            zIndex: 10,
+            background: 'rgba(255, 255, 255, 0.85)',
+            padding: '2px 8px',
+            fontSize: '9.5px',
+            fontFamily: 'sans-serif',
+            color: '#444',
+            borderTopLeftRadius: '4px',
+            border: '1px solid #e0e0e0',
+          }}
+        >
+          <a href="https://openfreemap.org" target="_blank" rel="noreferrer" style={{ color: '#006699', fontWeight: 600, textDecoration: 'none' }}>
+            OpenFreeMap
+          </a>
+          {' · '}
+          <a href="https://www.openmaptiles.org/" target="_blank" rel="noreferrer" style={{ color: '#555', textDecoration: 'none' }}>
+            © OpenMapTiles
+          </a>
+          {' · '}
+          <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noreferrer" style={{ color: '#555', textDecoration: 'none' }}>
+            © OpenStreetMap
+          </a>
+        </div>
+
         {lookupLoading && (
           <div
             style={{
               position: 'absolute',
               top: '10px',
-              right: '10px',
-              zIndex: 500,
-              background: 'rgba(255, 255, 255, 0.92)',
+              left: '10px',
+              zIndex: 10,
+              background: 'rgba(255, 255, 255, 0.94)',
               borderRadius: 'var(--radius-sm)',
               padding: '0.35rem 0.65rem',
               fontSize: '0.72rem',
               color: 'var(--color-climate-700)',
               fontWeight: 500,
               boxShadow: 'var(--shadow-card)',
+              border: '1px solid var(--color-border)',
             }}
           >
-            Fetching site elevation & climate…
+            Fetching site elevation & climate zone…
           </div>
         )}
       </div>

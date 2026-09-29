@@ -10,16 +10,13 @@ class Settings(BaseSettings):
     API_VERSION: str = "v1"
     DEBUG: bool = True
 
-    # Database: Supabase PostgreSQL (asyncpg) or SQLite fallback
-    DATABASE_URL: str = os.getenv(
-        "DATABASE_URL",
-        "sqlite+aiosqlite:///./thermashell.db"
-    )
+    # Database: MongoDB Atlas
+    MONGODB_URI: str = os.getenv("MONGODB_URI", "")
+    MONGODB_DATABASE: str = os.getenv("MONGODB_DATABASE", "thermashell")
 
-    # Supabase Configuration
-    SUPABASE_URL: Optional[str] = os.getenv("SUPABASE_URL", "")
-    SUPABASE_KEY: Optional[str] = os.getenv("SUPABASE_KEY", "")
-    SUPABASE_SERVICE_ROLE_KEY: Optional[str] = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    def validate_mongodb(self):
+        if not self.MONGODB_URI:
+            raise ValueError("MONGODB_URI environment variable is missing. Configure MongoDB Atlas to start the application.")
 
     # Storage: "local" or "supabase"
     STORAGE_BACKEND: str = os.getenv("STORAGE_BACKEND", "local")
@@ -33,10 +30,8 @@ class Settings(BaseSettings):
         "http://127.0.0.1:3000",
     ]
 
-    # Geocoding and Elevation
-    MAPBOX_ACCESS_TOKEN: Optional[str] = os.getenv("MAPBOX_ACCESS_TOKEN", "")
-    GEOCODING_PROVIDER: str = os.getenv("GEOCODING_PROVIDER", "nominatim")  # mapbox or nominatim
-    ELEVATION_PROVIDER: str = os.getenv("ELEVATION_PROVIDER", "open-elevation")  # mapbox or open-elevation
+    GEOCODING_PROVIDER: str = os.getenv("GEOCODING_PROVIDER", "nominatim")
+    ELEVATION_PROVIDER: str = os.getenv("ELEVATION_PROVIDER", "open-elevation")
 
     # NASA POWER API
     NASA_POWER_BASE_URL: str = "https://power.larc.nasa.gov/api/temporal/hourly/point"

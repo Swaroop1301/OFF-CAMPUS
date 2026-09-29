@@ -11,11 +11,10 @@ from typing import List, Optional, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect, HTTPException, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
-from database import get_db, async_session
-from models import SimulationJob, SimulationResult, Scenario, ClimateDataset, ClimateRecord
+from database import get_db
+
 from services.storage_service import storage_service
 from thermashell_engine.types import (
     ShelterGeometry, MaterialLayer, WallAssembly, Envelope, Opening,
@@ -86,6 +85,104 @@ class RunSimulationPayload(BaseModel):
     climate: Optional[ClimateInputPayload] = None
     duration_hours: int = 72
 
+    # Prohibited synthetic parameters — accepted only to detect and reject non-compliant requests
+    base_outdoor_temp_c: Optional[float] = None
+    temp_swing_c: Optional[float] = None
+
+
+from services.climate_service import fetch_climate_data
+import uuid
+
+async def _ensure_climate_data(payload: RunSimulationPayload, db: AsyncIOMotorDatabase):
+    """
+    Enforces that real meteorological data from NASA POWER reaches the physics engine.
+    Strictly rejects synthetic weather generation (sine waves, base temperatures, fake swings).
+    Resolves the canonical dataset from MongoDB Atlas and populates payload.climate.
+    """
+    # 1. Enforce strict prohibition of synthetic boundary parameters
+    if payload.base_outdoor_temp_c is not None or payload.temp_swing_c is not None:
+        raise HTTPException(
+            status_code=400,
+            detail="Synthetic climate boundary parameters (base_outdoor_temp_c, temp_swing_c) are prohibited. A verified NASA POWER climate dataset is required."
+        )
+
+    # 2. If direct valid real timeseries is provided, accept it
+    if payload.climate and payload.climate.timestamps and payload.climate.temperature_c and len(payload.climate.temperature_c) > 0:
+        return payload
+
+    # 3. Reject if no climate_dataset_id provided
+    if not payload.climate_dataset_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Valid climate dataset (NASA POWER) is required. Synthetic generation of weather data is prohibited."
+        )
+
+    # 4. Load from MongoDB Atlas using climate_dataset_id
+    dataset = await db.climate_datasets.find_one({"$or": [{"id": payload.climate_dataset_id}, {"_id": payload.climate_dataset_id}]})
+    if not dataset:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Climate dataset '{payload.climate_dataset_id}' not found in MongoDB Atlas."
+        )
+    
+    import json
+    from services.storage_service import storage_service
+    
+    # Try to load full payload from storage or fallback to native document parameters
+    dataset_hash = dataset.get("dataset_hash")
+    storage_data = None
+    if dataset_hash:
+        try:
+            storage_data = await storage_service.get_artifact("climate", f"{dataset_hash}.json")
+        except Exception:
+            storage_data = None
+
+    if storage_data:
+        try:
+            cached_payload = json.loads(storage_data.decode("utf-8"))
+            params_dict = cached_payload.get("parameters", {})
+        except Exception:
+            params_dict = json.loads(dataset["parameters_json"]) if "parameters_json" in dataset else dataset.get("parameters", {})
+    else:
+        if "parameters" in dataset and isinstance(dataset["parameters"], dict):
+            params_dict = dataset["parameters"]
+        elif "parameters_json" in dataset:
+            params_dict = json.loads(dataset["parameters_json"])
+        else:
+            params_dict = {}
+
+    timestamps = sorted(list(params_dict.get("T2M", {}).keys()))
+    if not timestamps:
+        raise HTTPException(
+            status_code=400,
+            detail=f"Climate dataset '{payload.climate_dataset_id}' contains no meteorological observation timestamps."
+        )
+
+    if payload.duration_hours and len(timestamps) > payload.duration_hours:
+        timestamps = timestamps[:payload.duration_hours]
+
+    t2m = []
+    rh2m = []
+    ws10m = []
+    ghi = []
+    ps = []
+
+    for ts in timestamps:
+        t2m.append(params_dict.get("T2M", {}).get(ts, 0.0))
+        rh2m.append(params_dict.get("RH2M", {}).get(ts, 50.0))
+        ws10m.append(params_dict.get("WS10M", {}).get(ts, 1.0))
+        ghi.append(params_dict.get("ALLSKY_SFC_SW_DWN", {}).get(ts, 0.0))
+        ps.append(params_dict.get("PS", {}).get(ts, 101.3))
+        
+    payload.climate = ClimateInputPayload(
+        timestamps=timestamps,
+        temperature_c=t2m,
+        relative_humidity=rh2m,
+        wind_speed_ms=ws10m,
+        solar_ghi=ghi,
+        pressure_kpa=ps
+    )
+    return payload
 
 def _build_engine_config(payload: RunSimulationPayload) -> SimulationConfig:
     roof_map = {
@@ -166,24 +263,14 @@ def _build_engine_config(payload: RunSimulationPayload) -> SimulationConfig:
     ]
 
     # Process climate timeseries
-    if payload.climate and payload.climate.timestamps:
-        timestamps = payload.climate.timestamps
-        temps = payload.climate.temperature_c
-        rh = payload.climate.relative_humidity or [40.0] * len(temps)
-        wind = payload.climate.wind_speed_ms or [2.0] * len(temps)
-        ghi = payload.climate.solar_ghi or [0.0] * len(temps)
-    else:
-        # Default baseline real design day timeseries (Leh extreme winter sub-zero cycle)
-        n = payload.duration_hours
-        timestamps = [f"2024-01-15T{h % 24:02d}:00:00Z" for h in range(n)]
-        # Physically consistent diurnal extreme curve based on IMD / Leh weather station records
-        temps = [-14.5, -15.8, -17.2, -18.0, -18.4, -16.5, -13.2, -8.4, -4.1, -1.8, -0.5, -1.2, -3.5, -6.8, -9.5, -11.8, -13.0, -14.0]
-        # Repeat or slice to n
-        temps = [temps[i % len(temps)] for i in range(n)]
-        rh = [25.0] * n
-        wind = [2.2] * n
-        solar_day = [0, 0, 0, 0, 0, 0, 45, 180, 420, 680, 840, 890, 810, 620, 360, 110, 0, 0, 0, 0, 0, 0, 0, 0]
-        ghi = [float(solar_day[i % 24]) for i in range(n)]
+    if not (payload.climate and payload.climate.timestamps):
+        raise ValueError("Real climate data (NASA POWER or valid timeseries) is required. Synthetic fallbacks are prohibited.")
+        
+    timestamps = payload.climate.timestamps
+    temps = payload.climate.temperature_c
+    rh = payload.climate.relative_humidity or [40.0] * len(temps)
+    wind = payload.climate.wind_speed_ms or [2.0] * len(temps)
+    ghi = payload.climate.solar_ghi or [0.0] * len(temps)
 
     climate = ClimateTimeseries(
         timestamps=timestamps,
@@ -216,52 +303,59 @@ def _build_engine_config(payload: RunSimulationPayload) -> SimulationConfig:
 
 
 @router.post("/run")
-async def execute_simulation(payload: RunSimulationPayload, db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def execute_simulation(payload: RunSimulationPayload, db: AsyncIOMotorDatabase = Depends(get_db)) -> Dict[str, Any]:
     """Execute transient thermal physics simulation synchronously and persist results."""
     try:
+        await _ensure_climate_data(payload, db)
         cfg = _build_engine_config(payload)
         result = run_simulation(cfg)
         result_dict = result.model_dump()
 
+        job_id = str(uuid.uuid4())
+        
         # Persist Job & Results
-        job = SimulationJob(
-            scenario_id=payload.scenario_id,
-            climate_dataset_id=payload.climate_dataset_id,
-            status="completed",
-            solver_type="4R2C_EULER",
-            time_step_s=cfg.timestep_s,
-            completed_at=datetime.utcnow()
-        )
-        db.add(job)
-        await db.flush()
+        job = {
+            "_id": job_id,
+            "id": job_id,
+            "scenario_id": payload.scenario_id,
+            "climate_dataset_id": payload.climate_dataset_id,
+            "status": "completed",
+            "solver_type": "4R2C_EULER",
+            "time_step_s": cfg.timestep_s,
+            "completed_at": datetime.utcnow()
+        }
+        await db.simulation_jobs.insert_one(job)
 
         storage_path = await storage_service.save_artifact(
             bucket="simulation",
-            path=f"{job.id}_timeseries.json",
+            path=f"{job_id}_timeseries.json",
             content=result_dict
         )
 
-        sim_res = SimulationResult(
-            job_id=job.id,
-            scenario_id=payload.scenario_id,
-            duration_hours=result.simulation_hours,
-            heating_demand_kwh=result.heat_balance.heating_energy_kwh,
-            cooling_demand_kwh=result.heat_balance.cooling_energy_kwh,
-            peak_heating_kw=result.peak_heating_load_w / 1000.0,
-            peak_cooling_kw=result.peak_cooling_load_w / 1000.0,
-            comfort_compliance_pct=result.comfort.comfort_percentage,
-            mean_pmv=result.comfort.pmv_mean,
-            mean_ppd=result.comfort.ppd_mean,
-            timeseries_storage_path=storage_path,
-            summary_json=json.dumps(result_dict)
-        )
-        db.add(sim_res)
-        await db.commit()
+        sim_res = {
+            "_id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "scenario_id": payload.scenario_id,
+            "duration_hours": result.simulation_hours,
+            "heating_demand_kwh": result.heat_balance.heating_energy_kwh,
+            "cooling_demand_kwh": result.heat_balance.cooling_energy_kwh,
+            "peak_heating_kw": result.peak_heating_load_w / 1000.0,
+            "peak_cooling_kw": result.peak_cooling_load_w / 1000.0,
+            "comfort_compliance_pct": result.comfort.comfort_percentage,
+            "mean_pmv": result.comfort.pmv_mean,
+            "mean_ppd": result.comfort.ppd_mean,
+            "timeseries_storage_path": storage_path,
+            "summary_json": json.dumps(result_dict),
+            "created_at": datetime.utcnow()
+        }
+        await db.simulation_results.insert_one(sim_res)
 
-        result_dict["job_id"] = job.id
+        result_dict["job_id"] = job_id
         result_dict["persisted"] = True
         return result_dict
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error("Simulation run error: %s", e)
         raise HTTPException(status_code=500, detail=f"Simulation failed: {str(e)}")
@@ -277,6 +371,15 @@ async def simulation_websocket(websocket: WebSocket):
     try:
         data = await websocket.receive_json()
         payload = RunSimulationPayload(**data)
+        
+        import database
+        from config import settings
+        if database.client is None:
+            await database.init_db()
+        db = database.client[settings.MONGODB_DATABASE]
+        
+        await _ensure_climate_data(payload, db)
+        
         cfg = _build_engine_config(payload)
 
         stages = [
@@ -301,41 +404,44 @@ async def simulation_websocket(websocket: WebSocket):
         result_dict = result.model_dump()
 
         # Persist asynchronously
-        async with async_session() as session:
-            job = SimulationJob(
-                scenario_id=payload.scenario_id,
-                climate_dataset_id=payload.climate_dataset_id,
-                status="completed",
-                solver_type="4R2C_EULER",
-                time_step_s=cfg.timestep_s,
-                completed_at=datetime.utcnow()
-            )
-            session.add(job)
-            await session.flush()
+        job_id = str(uuid.uuid4())
+        job = {
+            "_id": job_id,
+            "id": job_id,
+            "scenario_id": payload.scenario_id,
+            "climate_dataset_id": payload.climate_dataset_id,
+            "status": "completed",
+            "solver_type": "4R2C_EULER",
+            "time_step_s": cfg.timestep_s,
+            "completed_at": datetime.utcnow()
+        }
+        await db.simulation_jobs.insert_one(job)
 
-            storage_path = await storage_service.save_artifact(
-                bucket="simulation",
-                path=f"{job.id}_timeseries.json",
-                content=result_dict
-            )
+        storage_path = await storage_service.save_artifact(
+            bucket="simulation",
+            path=f"{job_id}_timeseries.json",
+            content=result_dict
+        )
 
-            sim_res = SimulationResult(
-                job_id=job.id,
-                scenario_id=payload.scenario_id,
-                duration_hours=result.simulation_hours,
-                heating_demand_kwh=result.heat_balance.heating_energy_kwh,
-                cooling_demand_kwh=result.heat_balance.cooling_energy_kwh,
-                peak_heating_kw=result.peak_heating_load_w / 1000.0,
-                peak_cooling_kw=result.peak_cooling_load_w / 1000.0,
-                comfort_compliance_pct=result.comfort.comfort_percentage,
-                mean_pmv=result.comfort.pmv_mean,
-                mean_ppd=result.comfort.ppd_mean,
-                timeseries_storage_path=storage_path,
-                summary_json=json.dumps(result_dict)
-            )
-            session.add(sim_res)
-            await session.commit()
-            result_dict["job_id"] = job.id
+        sim_res = {
+            "_id": str(uuid.uuid4()),
+            "job_id": job_id,
+            "scenario_id": payload.scenario_id,
+            "duration_hours": result.simulation_hours,
+            "heating_demand_kwh": result.heat_balance.heating_energy_kwh,
+            "cooling_demand_kwh": result.heat_balance.cooling_energy_kwh,
+            "peak_heating_kw": result.peak_heating_load_w / 1000.0,
+            "peak_cooling_kw": result.peak_cooling_load_w / 1000.0,
+            "comfort_compliance_pct": result.comfort.comfort_percentage,
+            "mean_pmv": result.comfort.pmv_mean,
+            "mean_ppd": result.comfort.ppd_mean,
+            "timeseries_storage_path": storage_path,
+            "summary_json": json.dumps(result_dict),
+            "created_at": datetime.utcnow()
+        }
+        await db.simulation_results.insert_one(sim_res)
+        
+        result_dict["job_id"] = job_id
 
         await websocket.send_json({
             "type": "COMPLETED",

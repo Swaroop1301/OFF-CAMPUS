@@ -29,6 +29,7 @@
     "framer-motion": "^13.2.0",
     "leaflet": "^1.9.4",
     "lucide-react": "^1.43.0",
+    "maplibre-gl": "^6.11.2",
     "plotly.js": "^4.1.0",
     "react-hook-form": "^7.87.0",
     "react-leaflet": "^5.0.0",

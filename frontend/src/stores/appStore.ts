@@ -1,4 +1,5 @@
 import { create } from 'zustand'
+import { persist } from 'zustand/middleware'
 
 /* ══════════════════════════════════════════════════════════════════════
    App-level UI state
@@ -85,6 +86,8 @@ export interface ScenarioData {
   geometry: ScenarioGeometry
   envelope: EnvelopeData
   operating: OperatingData
+  climate_dataset_id: string | null
+  climate_data: any | null
   lastSaved: string | null
 }
 
@@ -143,6 +146,7 @@ interface ScenarioState {
   updateGeometry: (geo: Partial<ScenarioGeometry>) => void
   updateEnvelope: (env: Partial<EnvelopeData>) => void
   updateOperating: (op: Partial<OperatingData>) => void
+  setClimateData: (dataset_id: string | null, data: any | null) => void
   setScenarioName: (name: string) => void
   applyPreset: (preset: string) => void
   resetScenario: () => void
@@ -181,39 +185,51 @@ const PRESETS: Record<string, Partial<ScenarioData>> = {
   },
 }
 
-export const useScenarioStore = create<ScenarioState>((set) => ({
-  scenario: {
-    id: 'demo-leh-001',
-    name: 'Leh Winter High-Altitude Shelter',
-    location: { ...DEFAULT_LOCATION },
-    geometry: { ...DEFAULT_GEOMETRY },
-    envelope: { ...DEFAULT_ENVELOPE },
-    operating: { ...DEFAULT_OPERATING },
-    lastSaved: null,
-  },
-  updateLocation: (loc) =>
-    set((s) => ({ scenario: { ...s.scenario, location: { ...s.scenario.location, ...loc }, lastSaved: new Date().toISOString() } })),
-  updateGeometry: (geo) =>
-    set((s) => ({ scenario: { ...s.scenario, geometry: { ...s.scenario.geometry, ...geo }, lastSaved: new Date().toISOString() } })),
-  updateEnvelope: (env) =>
-    set((s) => ({ scenario: { ...s.scenario, envelope: { ...s.scenario.envelope, ...env }, lastSaved: new Date().toISOString() } })),
-  updateOperating: (op) =>
-    set((s) => ({ scenario: { ...s.scenario, operating: { ...s.scenario.operating, ...op }, lastSaved: new Date().toISOString() } })),
-  setScenarioName: (name) => set((s) => ({ scenario: { ...s.scenario, name } })),
-  applyPreset: (preset) => {
-    const p = PRESETS[preset]
-    if (p) set((s) => ({ scenario: { ...s.scenario, ...p, lastSaved: new Date().toISOString() } }))
-  },
-  resetScenario: () =>
-    set({
+export const useScenarioStore = create<ScenarioState>()(
+  persist(
+    (set) => ({
       scenario: {
-        id: 'demo-leh-001', name: 'Leh Winter High-Altitude Shelter',
-        location: { ...DEFAULT_LOCATION }, geometry: { ...DEFAULT_GEOMETRY },
-        envelope: { ...DEFAULT_ENVELOPE }, operating: { ...DEFAULT_OPERATING },
+        id: 'demo-leh-001',
+        name: 'Leh Winter High-Altitude Shelter',
+        location: { ...DEFAULT_LOCATION },
+        geometry: { ...DEFAULT_GEOMETRY },
+        envelope: { ...DEFAULT_ENVELOPE },
+        operating: { ...DEFAULT_OPERATING },
+        climate_dataset_id: null,
+        climate_data: null,
         lastSaved: null,
       },
+      updateLocation: (loc) =>
+        set((s) => ({ scenario: { ...s.scenario, location: { ...s.scenario.location, ...loc }, lastSaved: new Date().toISOString() } })),
+      updateGeometry: (geo) =>
+        set((s) => ({ scenario: { ...s.scenario, geometry: { ...s.scenario.geometry, ...geo }, lastSaved: new Date().toISOString() } })),
+      updateEnvelope: (env) =>
+        set((s) => ({ scenario: { ...s.scenario, envelope: { ...s.scenario.envelope, ...env }, lastSaved: new Date().toISOString() } })),
+      updateOperating: (op) =>
+        set((s) => ({ scenario: { ...s.scenario, operating: { ...s.scenario.operating, ...op }, lastSaved: new Date().toISOString() } })),
+      setClimateData: (dataset_id, data) =>
+        set((s) => ({ scenario: { ...s.scenario, climate_dataset_id: dataset_id, climate_data: data, lastSaved: new Date().toISOString() } })),
+      setScenarioName: (name) => set((s) => ({ scenario: { ...s.scenario, name } })),
+      applyPreset: (preset) => {
+        const p = PRESETS[preset]
+        if (p) set((s) => ({ scenario: { ...s.scenario, ...p, lastSaved: new Date().toISOString() } }))
+      },
+      resetScenario: () =>
+        set({
+          scenario: {
+            id: 'demo-leh-001', name: 'Leh Winter High-Altitude Shelter',
+            location: { ...DEFAULT_LOCATION }, geometry: { ...DEFAULT_GEOMETRY },
+            envelope: { ...DEFAULT_ENVELOPE }, operating: { ...DEFAULT_OPERATING },
+            climate_dataset_id: null, climate_data: null,
+            lastSaved: null,
+          },
+        }),
     }),
-}))
+    {
+      name: 'thermashell-scenario-storage',
+    }
+  )
+)
 
 /* ══════════════════════════════════════════════════════════════════════
    Simulation state
@@ -369,16 +385,22 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 /**
  * Build the RunSimulationPayload from the Zustand ScenarioData.
  * Maps Zustand store fields to backend API contract.
+ * References the verified NASA POWER climate dataset in MongoDB Atlas.
  */
 function buildSimulationPayload(scenario: ScenarioData) {
+  const datasetId = scenario.climate_dataset_id || scenario.climate_data?.dataset_id || null
+
   return {
     scenario_id: scenario.id,
     length_m: scenario.geometry.length,
     width_m: scenario.geometry.width,
     height_m: scenario.geometry.height,
+    roof_type: scenario.geometry.roof_type || 'gable',
     roof_pitch_deg: scenario.geometry.roof_pitch,
     orientation_deg: scenario.geometry.orientation,
     elevation_m: scenario.location.elevation,
+    latitude: scenario.location.latitude,
+    longitude: scenario.location.longitude,
     wall_layers: scenario.envelope.wall_layers.map((l) => ({
       name: l.name,
       thickness_mm: l.thickness_mm,
@@ -418,9 +440,15 @@ function buildSimulationPayload(scenario: ScenarioData) {
     ach_natural: scenario.operating.ach_natural,
     ach_infiltration: scenario.operating.ach_infiltration,
     duration_hours: 72,
-    base_outdoor_temp_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 35 : -10,
-    temp_swing_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 8 : 5,
-    peak_solar_ghi: scenario.location.elevation > 2000 ? 500 : 400,
+    climate_dataset_id: datasetId,
+    // Do NOT send massive timeseries over network when backend can load via dataset_id
+    climate: datasetId ? undefined : (scenario.climate_data ? {
+      timestamps: scenario.climate_data.timestamps,
+      temperature_c: scenario.climate_data.temperature,
+      relative_humidity: scenario.climate_data.humidity,
+      wind_speed_ms: scenario.climate_data.wind,
+      solar_ghi: scenario.climate_data.solar
+    } : undefined)
   }
 }
 
@@ -483,3 +511,161 @@ async function runHttpFallback(
     set(() => ({ status: 'failed' }))
   }
 }
+
+/* ══════════════════════════════════════════════════════════════════════
+   ANSYS Fluent CFD Co-Simulation Store
+   ══════════════════════════════════════════════════════════════════════ */
+
+export type AnsysStatus = 'NOT_STARTED' | 'QUEUED' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNAVAILABLE'
+export type ValidationDecision = 'NOT_RUN' | 'PENDING_ANSYS' | 'RUNNING' | 'COMPLETED' | 'FAILED' | 'UNAVAILABLE' | 'VALIDATED'
+
+interface AnsysState {
+  jobId: string | null
+  status: AnsysStatus
+  diagnostic: string | null
+  result: any | null
+  comparison: any | null
+  validationDecision: ValidationDecision
+  isTriggering: boolean
+  triggerAnsysJob: (scenarioId: string, simJobId?: string | null) => Promise<void>
+  pollAnsysJob: (jobId: string) => void
+  fetchScenarioStatus: (scenarioId: string) => Promise<void>
+  resetAnsys: () => void
+}
+
+export const useAnsysStore = create<AnsysState>()(
+  persist(
+    (set, get) => ({
+      jobId: null,
+      status: 'NOT_STARTED',
+      diagnostic: null,
+      result: null,
+      comparison: null,
+      validationDecision: 'NOT_RUN',
+      isTriggering: false,
+
+      triggerAnsysJob: async (scenarioId: string, simJobId?: string | null) => {
+        set({ isTriggering: true, diagnostic: null })
+        try {
+          const res = await fetch('/api/v1/ansys/jobs', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              scenario_id: scenarioId,
+              simulation_job_id: simJobId || undefined,
+              fluent_version: '24.1',
+              processors: 4,
+              mesh_resolution: 'medium'
+            })
+          })
+          const data = await res.json()
+          if (!res.ok) {
+            throw new Error(data.detail || data.diagnostic_message || 'Failed to start ANSYS job')
+          }
+
+          if (data.status === 'UNAVAILABLE') {
+            set({
+              jobId: data.job_id,
+              status: 'UNAVAILABLE',
+              diagnostic: data.diagnostic_message || 'ANSYS Fluent worker is offline or unavailable.',
+              validationDecision: 'UNAVAILABLE',
+              isTriggering: false
+            })
+            return
+          }
+
+          set({
+            jobId: data.job_id,
+            status: data.status,
+            diagnostic: null,
+            validationDecision: 'RUNNING',
+            isTriggering: false
+          })
+          get().pollAnsysJob(data.job_id)
+        } catch (err: any) {
+          set({
+            status: 'UNAVAILABLE',
+            diagnostic: err.message,
+            validationDecision: 'UNAVAILABLE',
+            isTriggering: false
+          })
+        }
+      },
+
+      pollAnsysJob: (jobId: string) => {
+        const timer = setInterval(async () => {
+          try {
+            const res = await fetch(`/api/v1/ansys/jobs/${jobId}`)
+            if (!res.ok) return
+            const data = await res.json()
+            const currentStatus = data.status as AnsysStatus
+            set({ status: currentStatus })
+
+            if (currentStatus === 'COMPLETED') {
+              clearInterval(timer)
+              set({ result: data.result })
+              // Fetch physics vs ANSYS comparison
+              const compRes = await fetch(`/api/v1/ansys/jobs/${jobId}/compare`)
+              if (compRes.ok) {
+                const compData = await compRes.json()
+                set({
+                  comparison: compData,
+                  validationDecision: compData.validation_decision || (compData.comparison_status === 'COMPLETED' ? 'VALIDATED' : 'FAILED')
+                })
+              }
+            } else if (currentStatus === 'FAILED' || currentStatus === 'UNAVAILABLE') {
+              clearInterval(timer)
+              set({
+                diagnostic: data.error_message || `ANSYS job reported status: ${currentStatus}`,
+                validationDecision: currentStatus === 'UNAVAILABLE' ? 'UNAVAILABLE' : 'FAILED'
+              })
+            }
+          } catch (err) {
+            console.error('ANSYS polling error:', err)
+          }
+        }, 4000)
+      },
+
+      fetchScenarioStatus: async (scenarioId: string) => {
+        try {
+          const res = await fetch(`/api/v1/ansys/scenarios/${scenarioId}/status`)
+          if (!res.ok) return
+          const data = await res.json()
+          set({
+            status: data.ansys_status,
+            validationDecision: data.validation_status,
+            diagnostic: data.error_message,
+            jobId: data.latest_job_id || get().jobId
+          })
+          if (data.latest_job_id && (data.ansys_status === 'QUEUED' || data.ansys_status === 'RUNNING')) {
+            get().pollAnsysJob(data.latest_job_id)
+          } else if (data.latest_job_id && data.ansys_status === 'COMPLETED' && !get().comparison) {
+            const compRes = await fetch(`/api/v1/ansys/jobs/${data.latest_job_id}/compare`)
+            if (compRes.ok) {
+              const compData = await compRes.json()
+              set({
+                comparison: compData,
+                validationDecision: compData.validation_decision || 'VALIDATED'
+              })
+            }
+          }
+        } catch (err) {
+          console.error('Failed to fetch scenario ANSYS status:', err)
+        }
+      },
+
+      resetAnsys: () => set({
+        jobId: null,
+        status: 'NOT_STARTED',
+        diagnostic: null,
+        result: null,
+        comparison: null,
+        validationDecision: 'NOT_RUN',
+        isTriggering: false
+      })
+    }),
+    {
+      name: 'thermashell-ansys-storage'
+    }
+  )
+)

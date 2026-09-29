@@ -1,4 +1,5 @@
 import { useState, useMemo, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import { 
   Sliders, 
@@ -12,7 +13,9 @@ import {
   Sun, 
   ShieldCheck, 
   RefreshCw,
-  Info
+  Info,
+  ArrowLeft,
+  ArrowRight
 } from 'lucide-react'
 import { useScenarioStore } from '@/stores/appStore'
 
@@ -59,7 +62,10 @@ export default function OptimizePage() {
           width_m: scenario.geometry.width,
           height_m: scenario.geometry.height,
           roof_pitch_deg: scenario.geometry.roof_pitch,
+          roof_type: scenario.geometry.roof_type || 'gable',
           orientation_deg: scenario.geometry.orientation,
+          latitude: scenario.location.latitude,
+          longitude: scenario.location.longitude,
           elevation_m: scenario.location.elevation,
           wall_layers: scenario.envelope.wall_layers.map((l) => ({
             name: l.name, thickness_mm: l.thickness_mm,
@@ -78,9 +84,14 @@ export default function OptimizePage() {
           ach_natural: scenario.operating.ach_natural,
           ach_infiltration: scenario.operating.ach_infiltration,
           duration_hours: 72,
-          base_outdoor_temp_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 35 : -10,
-          temp_swing_c: scenario.location.climate_zone.toLowerCase().includes('hot') ? 8 : 5,
-          peak_solar_ghi: scenario.location.elevation > 2000 ? 500 : 400,
+          climate_dataset_id: scenario.climate_dataset_id,
+          climate: scenario.climate_data ? {
+            timestamps: scenario.climate_data.timestamps,
+            temperature_c: scenario.climate_data.temperature,
+            relative_humidity: scenario.climate_data.humidity,
+            wind_speed_ms: scenario.climate_data.wind,
+            solar_ghi: scenario.climate_data.solar
+          } : undefined,
         },
         w_energy: energyWeight / totalW,
         w_comfort: comfortWeight / totalW,
@@ -446,6 +457,21 @@ export default function OptimizePage() {
               </div>
             ))}
           </div>
+        </div>
+      </div>
+
+      {/* Sequential Workflow Navigation */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1.5rem', borderTop: '1px solid var(--color-border)' }}>
+        <Link to="/results" className="btn btn-outline" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
+          <ArrowLeft size={16} /> Back to Simulation Results
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+            Stage 8 of 10 • Parametric Optimization
+          </span>
+          <Link to="/validation" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
+            Next Stage: CFD Validation Suite <ArrowRight size={16} />
+          </Link>
         </div>
       </div>
     </div>

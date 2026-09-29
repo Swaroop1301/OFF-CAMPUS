@@ -21,10 +21,10 @@ BUCKETS = ["climate", "simulation", "ansys", "reports", "exports"]
 
 class StorageService:
     def __init__(self):
-        self.backend = settings.STORAGE_BACKEND
-        self.local_root = Path(settings.STORAGE_LOCAL_DIR).resolve()
-        self.supabase_url = settings.SUPABASE_URL
-        self.supabase_key = settings.SUPABASE_SERVICE_ROLE_KEY or settings.SUPABASE_KEY
+        self.backend = getattr(settings, "STORAGE_BACKEND", "local")
+        self.local_root = Path(getattr(settings, "STORAGE_LOCAL_DIR", "./storage")).resolve()
+        self.supabase_url = getattr(settings, "SUPABASE_URL", None)
+        self.supabase_key = getattr(settings, "SUPABASE_SERVICE_ROLE_KEY", getattr(settings, "SUPABASE_KEY", None))
 
         # Ensure local directories exist for all buckets
         for b in BUCKETS:

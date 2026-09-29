@@ -178,6 +178,21 @@ export default function ResultsPage() {
           ))}
         </div>
       </div>
+
+      {/* Sequential Navigation Footer */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem', paddingBottom: '3rem' }}>
+        <Link to={`/scenario/${scenario.id}/simulate`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Simulation Console
+        </Link>
+        <div style={{ display: 'flex', gap: '1rem' }}>
+          <Link to={`/optimize`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+            Next: Parametric Optimization →
+          </Link>
+          <Link to={`/scenario/${scenario.id}/validation`} className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
+            Next: CFD Validation Suite →
+          </Link>
+        </div>
+      </div>
     </div>
   )
 }

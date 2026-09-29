@@ -13,6 +13,9 @@ from config import settings
 
 logger = logging.getLogger("thermashell.location")
 
+_last_nominatim_call = 0.0
+_NOMINATIM_RATE_LIMIT_S = 1.1
+
 
 def determine_climate_zone(lat: float, lon: float, elevation_m: float) -> str:
     """
@@ -38,38 +41,21 @@ def determine_climate_zone(lat: float, lon: float, elevation_m: float) -> str:
 
 class LocationService:
     def __init__(self):
-        self.mapbox_token = settings.MAPBOX_ACCESS_TOKEN
         self.geocoding_provider = settings.GEOCODING_PROVIDER
 
     async def forward_search(self, query: str) -> List[Dict[str, Any]]:
-        """Search locations matching query string."""
+        """Search locations matching query string using OpenStreetMap Nominatim."""
+        global _last_nominatim_call
         if not query or len(query.strip()) < 2:
             return []
 
-        # 1. Mapbox Geocoding if key is provided
-        if self.mapbox_token:
-            try:
-                url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{query}.json"
-                params = {"access_token": self.mapbox_token, "limit": 6}
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(url, params=params)
-                    if resp.status_code == 200:
-                        data = resp.json()
-                        results = []
-                        for feat in data.get("features", []):
-                            lon, lat = feat["center"]
-                            results.append({
-                                "name": feat.get("text", query),
-                                "full_name": feat.get("place_name", query),
-                                "latitude": round(lat, 5),
-                                "longitude": round(lon, 5),
-                                "provider": "mapbox"
-                            })
-                        return results
-            except Exception as e:
-                logger.warning("Mapbox forward geocoding failed: %s", e)
+        import time
+        import asyncio
+        now = time.time()
+        if now - _last_nominatim_call < _NOMINATIM_RATE_LIMIT_S:
+            await asyncio.sleep(_NOMINATIM_RATE_LIMIT_S - (now - _last_nominatim_call))
+        _last_nominatim_call = time.time()
 
-        # 2. OpenStreetMap Nominatim Fallback
         try:
             url = "https://nominatim.openstreetmap.org/search"
             params = {"q": query, "format": "json", "addressdetails": 1, "limit": 6}
@@ -94,29 +80,14 @@ class LocationService:
         return []
 
     async def reverse_geocode(self, lat: float, lon: float) -> Dict[str, Any]:
-        """Convert latitude and longitude coordinates into city, state, country metadata."""
-        # 1. Mapbox reverse
-        if self.mapbox_token:
-            try:
-                url = f"https://api.mapbox.com/geocoding/v5/mapbox.places/{lon},{lat}.json"
-                params = {"access_token": self.mapbox_token, "limit": 1}
-                async with httpx.AsyncClient(timeout=10.0) as client:
-                    resp = await client.get(url, params=params)
-                    if resp.status_code == 200:
-                        features = resp.json().get("features", [])
-                        if features:
-                            place = features[0]
-                            return {
-                                "name": place.get("text", f"{lat:.2f}, {lon:.2f}"),
-                                "full_name": place.get("place_name", ""),
-                                "latitude": lat,
-                                "longitude": lon,
-                                "provider": "mapbox"
-                            }
-            except Exception as e:
-                logger.warning("Mapbox reverse geocode failed: %s", e)
-
-        # 2. Nominatim reverse
+        """Convert latitude and longitude coordinates into city, state, country metadata using Nominatim."""
+        global _last_nominatim_call
+        import time
+        import asyncio
+        now = time.time()
+        if now - _last_nominatim_call < _NOMINATIM_RATE_LIMIT_S:
+            await asyncio.sleep(_NOMINATIM_RATE_LIMIT_S - (now - _last_nominatim_call))
+        _last_nominatim_call = time.time()
         try:
             url = "https://nominatim.openstreetmap.org/reverse"
             params = {"lat": lat, "lon": lon, "format": "json"}

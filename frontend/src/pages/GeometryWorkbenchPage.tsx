@@ -1,5 +1,42 @@
 import { useScenarioStore } from '@/stores/appStore'
-import { Box, Ruler, RotateCw } from 'lucide-react'
+import { Box, Ruler, RotateCw, Info } from 'lucide-react'
+import { useState } from 'react'
+import { Link } from 'react-router-dom'
+
+const FIELD_TOOLTIPS: Record<string, string> = {
+  length: 'External length of the shelter along the primary axis. Defines the east-west span when orientation is 180° (south-facing). Affects wall area, floor area, and conduction losses.',
+  width: 'External width perpendicular to the primary axis. Defines the north-south depth. Larger width increases roof area and solar exposure on the roof plane.',
+  height: 'Floor-to-ceiling height. Higher ceilings increase volume (ventilation load) and wall area (conduction losses). For cold climates, lower ceilings reduce heating demand.',
+  roof_pitch: 'Angle of the roof slope in degrees from horizontal. Affects snow shedding, rainwater runoff, and the effective roof area for solar gain calculations. 0° = flat roof.',
+  orientation: 'Compass bearing of the primary facade in degrees clockwise from north. 0° = north-facing, 180° = south-facing. South-facing orientation maximizes passive solar gain in cold climates (Northern Hemisphere).',
+}
+
+function TooltipIcon({ fieldKey }: { fieldKey: string }) {
+  const [show, setShow] = useState(false)
+  const tip = FIELD_TOOLTIPS[fieldKey]
+  if (!tip) return null
+  return (
+    <span 
+      style={{ position: 'relative', cursor: 'help', display: 'inline-flex', alignItems: 'center' }}
+      onMouseEnter={() => setShow(true)}
+      onMouseLeave={() => setShow(false)}
+    >
+      <Info size={12} color="var(--color-text-muted)" />
+      {show && (
+        <div style={{
+          position: 'absolute', bottom: '100%', left: '50%', transform: 'translateX(-50%)',
+          width: '260px', padding: '0.625rem 0.75rem', background: 'var(--color-bg-card)',
+          border: '1px solid var(--color-border)', borderRadius: 'var(--radius-sm)',
+          boxShadow: 'var(--shadow-elevated)', fontSize: '0.72rem', lineHeight: 1.5,
+          color: 'var(--color-text-secondary)', zIndex: 100, marginBottom: '4px',
+          pointerEvents: 'none',
+        }}>
+          {tip}
+        </div>
+      )}
+    </span>
+  )
+}
 
 export default function GeometryWorkbenchPage() {
   const { scenario, updateGeometry } = useScenarioStore()
@@ -24,8 +61,10 @@ export default function GeometryWorkbenchPage() {
             { label: 'Orientation', key: 'orientation' as const, unit: '°', val: orientation, min: 0, max: 359, step: 5 },
           ].map(f => (
             <div key={f.key} style={{ marginBottom: '0.75rem' }}>
-              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.25rem' }}>
-                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em' }}>{f.label}</label>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.25rem' }}>
+                <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase', letterSpacing: '0.04em', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  {f.label} <TooltipIcon fieldKey={f.key} />
+                </label>
                 <span style={{ fontFamily: 'var(--font-mono)', fontSize: '0.8125rem', fontWeight: 500 }}>{f.val}{f.unit}</span>
               </div>
               <input
@@ -35,7 +74,10 @@ export default function GeometryWorkbenchPage() {
               />
             </div>
           ))}
-          <label style={{ display: 'block', marginBottom: '0.25rem', fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Roof Type</label>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', marginBottom: '0.25rem' }}>
+            <label style={{ fontSize: '0.75rem', fontWeight: 600, color: 'var(--color-text-muted)', textTransform: 'uppercase' }}>Roof Type</label>
+            <TooltipIcon fieldKey="roof_type" />
+          </div>
           <select className="input" value={roof_type} onChange={(e) => updateGeometry({ roof_type: e.target.value })}>
             <option value="flat">Flat</option>
             <option value="gable">Gable</option>
@@ -136,6 +178,23 @@ export default function GeometryWorkbenchPage() {
             </div>
           </div>
         </div>
+      </div>
+      {/* Sequential Navigation */}
+      <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem' }}>
+        <Link to={`/scenario/${scenario.id}/climate`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Climate Data
+        </Link>
+        <Link 
+          to={`/scenario/${scenario.id}/materials`} 
+          className="btn btn-primary" 
+          style={{ 
+            padding: '0.75rem 2rem',
+            pointerEvents: length > 0 && width > 0 && height > 0 ? 'auto' : 'none',
+            opacity: length > 0 && width > 0 && height > 0 ? 1 : 0.5
+          }}
+        >
+          Next: Materials Library →
+        </Link>
       </div>
     </div>
   )

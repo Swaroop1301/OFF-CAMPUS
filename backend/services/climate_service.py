@@ -15,14 +15,13 @@ import logging
 import time
 from datetime import datetime
 from typing import Dict, Any, List, Optional
+import uuid
 
 import httpx
-from sqlalchemy import select
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from config import settings
 from exceptions import ClimateSourceUnavailable
-from models import ClimateDataset, ClimateRecord, Location
 from services.storage_service import storage_service
 
 logger = logging.getLogger("thermashell.climate")
@@ -107,7 +106,7 @@ def validate_and_normalize_climate(
 
 
 async def fetch_climate_data(
-    db: AsyncSession,
+    db: AsyncIOMotorDatabase,
     latitude: float,
     longitude: float,
     start_date: str,
@@ -126,13 +125,10 @@ async def fetch_climate_data(
 
     # ── 1. Check authoritative database cache ──────────────────────────────
     if not force_refresh:
-        stmt = (
-            select(ClimateDataset)
-            .where(ClimateDataset.dataset_hash == cache_key)
-            .order_by(ClimateDataset.created_at.desc())
+        cached_dataset = await db.climate_datasets.find_one(
+            {"dataset_hash": cache_key},
+            sort=[("created_at", -1)]
         )
-        result = await db.execute(stmt)
-        cached_dataset = result.scalar_one_or_none()
 
         if cached_dataset:
             # Try to load full payload from storage or fallback to parameters_json
@@ -145,13 +141,14 @@ async def fetch_climate_data(
                     pass
 
             if not cached_payload:
-                cached_payload = json.loads(cached_dataset.parameters_json)
+                cached_payload = json.loads(cached_dataset["parameters_json"])
 
+            retrieval_ts = cached_dataset.get("retrieval_timestamp")
             cached_payload["_cache"] = {
                 "hit": True,
                 "source_state": "CACHED",
-                "retrieved_at": cached_dataset.retrieval_timestamp.isoformat() if cached_dataset.retrieval_timestamp else None,
-                "dataset_id": cached_dataset.id,
+                "retrieved_at": retrieval_ts.isoformat() if isinstance(retrieval_ts, datetime) else str(retrieval_ts) if retrieval_ts else None,
+                "dataset_id": cached_dataset["id"],
                 "dataset_hash": cache_key,
             }
             return cached_payload
@@ -213,19 +210,23 @@ async def fetch_climate_data(
                     }
                 }
 
+                dataset_id = str(uuid.uuid4())
+                
                 # Save dataset to database
-                db_dataset = ClimateDataset(
-                    source="NASA POWER",
-                    start_date=start_date,
-                    end_date=end_date,
-                    dataset_hash=cache_key,
-                    parameters_json=json.dumps(cleaned_params),
-                    raw_metadata_json=json.dumps(data.get("header", {})),
-                    is_validated=1,
-                    retrieval_timestamp=datetime.utcnow()
-                )
-                db.add(db_dataset)
-                await db.flush()
+                db_dataset = {
+                    "_id": dataset_id,
+                    "id": dataset_id,
+                    "source": "NASA POWER",
+                    "start_date": start_date,
+                    "end_date": end_date,
+                    "dataset_hash": cache_key,
+                    "parameters_json": json.dumps(cleaned_params),
+                    "raw_metadata_json": json.dumps(data.get("header", {})),
+                    "is_validated": 1,
+                    "retrieval_timestamp": datetime.utcnow(),
+                    "created_at": datetime.utcnow()
+                }
+                await db.climate_datasets.insert_one(db_dataset)
 
                 # Add records
                 timestamps = norm_res["timestamps"]
@@ -235,19 +236,20 @@ async def fetch_climate_data(
                 ghi = cleaned_params.get("ALLSKY_SFC_SW_DWN", {})
                 ps = cleaned_params.get("PS", {})
 
+                records = []
                 for ts in timestamps:
-                    rec = ClimateRecord(
-                        dataset_id=db_dataset.id,
-                        timestamp=ts,
-                        temperature_c=t2m.get(ts, 0.0),
-                        relative_humidity=rh2m.get(ts, 50.0),
-                        wind_speed_ms=ws10m.get(ts, 1.0),
-                        solar_ghi=ghi.get(ts, 0.0),
-                        surface_pressure_kpa=ps.get(ts, 101.3),
-                    )
-                    db.add(rec)
-
-                await db.commit()
+                    records.append({
+                        "_id": str(uuid.uuid4()),
+                        "dataset_id": dataset_id,
+                        "timestamp": ts,
+                        "temperature_c": t2m.get(ts, 0.0),
+                        "relative_humidity": rh2m.get(ts, 50.0),
+                        "wind_speed_ms": ws10m.get(ts, 1.0),
+                        "solar_ghi": ghi.get(ts, 0.0),
+                        "surface_pressure_kpa": ps.get(ts, 101.3),
+                    })
+                if records:
+                    await db.climate_records.insert_many(records)
 
                 # Save full artifact to object storage bucket
                 await storage_service.save_artifact(
@@ -256,7 +258,7 @@ async def fetch_climate_data(
                     content=normalized
                 )
 
-                normalized["_cache"]["dataset_id"] = db_dataset.id
+                normalized["_cache"]["dataset_id"] = dataset_id
                 return normalized
 
             else:

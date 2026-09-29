@@ -1,6 +1,8 @@
 import { motion } from 'framer-motion'
 import { Search, Plus, RefreshCw, Layers, ShieldCheck, AlertTriangle, BookOpen, X, CheckCircle2 } from 'lucide-react'
 import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
+import { useScenarioStore } from '@/stores/appStore'
 
 interface MaterialItem {
   id: string
@@ -36,6 +38,7 @@ const CATEGORY_COLORS: Record<string, string> = {
 }
 
 export default function MaterialLibraryPage() {
+  const { scenario } = useScenarioStore()
   const [search, setSearch] = useState('')
   const [categoryFilter, setCategoryFilter] = useState<string | null>(null)
   const [materials, setMaterials] = useState<MaterialItem[]>([])
@@ -432,6 +435,16 @@ export default function MaterialLibraryPage() {
           </div>
         </div>
       )}
+
+      {/* Sequential Navigation */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem' }}>
+        <Link to={`/scenario/${scenario.id}/geometry`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Geometry
+        </Link>
+        <Link to={`/scenario/${scenario.id}/envelope`} className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
+          Next: Envelope Construction →
+        </Link>
+      </div>
     </div>
   )
 }

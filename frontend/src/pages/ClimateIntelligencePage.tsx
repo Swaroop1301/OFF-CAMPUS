@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { Cloud, RefreshCw, AlertTriangle, Database, Calendar, CheckCircle2, Info } from 'lucide-react'
 import { useScenarioStore } from '@/stores/appStore'
+import { Link } from 'react-router-dom'
 
 interface ClimateDataState {
   dataset_id?: string
@@ -14,7 +15,7 @@ interface ClimateDataState {
 }
 
 export default function ClimateIntelligencePage() {
-  const { scenario } = useScenarioStore()
+  const { scenario, setClimateData } = useScenarioStore()
   const [dataSource, setDataSource] = useState<'live' | 'cached' | 'error' | 'idle'>('idle')
   const [data, setData] = useState<ClimateDataState | null>(null)
   const [isLoading, setIsLoading] = useState(false)
@@ -69,7 +70,7 @@ export default function ClimateIntelligencePage() {
           return range === 'annual' ? `Day ${d}` : `D${d} ${hr}:00`
         })
 
-        setData({
+        const newData = {
           dataset_id: json.dataset_id,
           timestamps,
           temperature: json.temperature_c,
@@ -78,19 +79,23 @@ export default function ClimateIntelligencePage() {
           solar: json.solar_ghi || [],
           retrieved_at: json.retrieved_at,
           records_count: n,
-        })
+        }
+        setData(newData)
+        setClimateData(json.dataset_id || null, newData)
       } else if (json.properties?.parameter?.T2M) {
         // Raw NASA response parsing
         const p = json.properties.parameter
         const keys = Object.keys(p.T2M).sort()
-        setData({
+        const newData = {
           timestamps: keys.map((k) => k.slice(-4).replace(/(\d{2})(\d{2})/, '$1:$2')),
           temperature: keys.map((k) => p.T2M[k] ?? 0),
           humidity: keys.map((k) => p.RH2M?.[k] ?? 0),
           wind: keys.map((k) => p.WS10M?.[k] ?? 0),
           solar: keys.map((k) => p.ALLSKY_SFC_SW_DWN?.[k] ?? 0),
           records_count: keys.length,
-        })
+        }
+        setData(newData)
+        setClimateData(null, newData)
       } else {
         throw new Error('No meteorological observations returned for specified coordinates.')
       }
@@ -303,6 +308,31 @@ export default function ClimateIntelligencePage() {
           <MiniChart label="All-Sky Global Horizontal Solar Irradiance (GHI)" values={data.solar} color="var(--color-solar-600)" unit=" W/m²" />
         </div>
       )}
+
+      {/* Navigation */}
+      <div style={{ marginTop: '2rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem' }}>
+        <Link to={`/scenario/${scenario.id}`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Site & Location
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          {(!data || isLoading) && (
+            <span style={{ fontSize: '0.8rem', color: 'var(--color-text-muted)' }}>
+              {isLoading ? 'Syncing with NASA…' : 'Sync climate data to proceed'}
+            </span>
+          )}
+          <Link
+            to={`/scenario/${scenario.id}/geometry`}
+            className={`btn ${data && !isLoading ? 'btn-primary' : 'btn-outline disabled'}`}
+            style={{
+              padding: '0.75rem 2rem',
+              pointerEvents: data && !isLoading ? 'auto' : 'none',
+              opacity: data && !isLoading ? 1 : 0.5
+            }}
+          >
+            Next: Geometry Specification →
+          </Link>
+        </div>
+      </div>
     </div>
   )
 }

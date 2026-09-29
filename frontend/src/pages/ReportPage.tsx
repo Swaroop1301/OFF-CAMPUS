@@ -14,13 +14,18 @@ import {
   Sun, 
   Layers, 
   Flame, 
-  Calendar 
+  Calendar,
+  ArrowLeft,
+  RotateCcw,
+  Cpu
 } from 'lucide-react'
-import { useScenarioStore, useSimulationStore } from '@/stores/appStore'
+import { Link } from 'react-router-dom'
+import { useScenarioStore, useSimulationStore, useAnsysStore } from '@/stores/appStore'
 
 export default function ReportPage() {
   const { scenario } = useScenarioStore()
   const { results } = useSimulationStore()
+  const { status: ansysStatus, validationDecision, comparison: ansysComparison } = useAnsysStore()
 
   // Section inclusion toggles
   const [includeExecutive, setIncludeExecutive] = useState(true)
@@ -48,27 +53,161 @@ export default function ReportPage() {
         a.href = url
         a.download = `THERMASHELL_${scenario.id}_report.json`
         a.click()
+        URL.revokeObjectURL(url)
       } else if (type === 'csv') {
         const rows = [
-          ['Timestamp', 'Outdoor Temp (°C)', 'Indoor Temp (°C)', 'Solar GHI (W/m²)'],
+          ['Timestamp', 'Outdoor Temp (°C)', 'Indoor Temp (°C)', 'Q Solar (W)', 'Q HVAC (W)'],
           ...(results?.timestamps || []).map((t: string, i: number) => [
             t,
             results?.outdoor_temp_c?.[i] ?? '',
             results?.indoor_temp_c?.[i] ?? '',
-            results?.solar_ghi?.[i] ?? '',
+            results?.q_solar_gain?.[i] ?? '',
+            results?.q_hvac?.[i] ?? '',
           ]),
         ]
-        const csvContent = 'data:text/csv;charset=utf-8,' + rows.map((e) => e.join(',')).join('\n')
-        const encodedUri = encodeURI(csvContent)
+        const csvContent = rows.map((e) => e.join(',')).join('\n')
+        const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
         const a = document.createElement('a')
-        a.href = encodedUri
+        a.href = url
         a.download = `THERMASHELL_${scenario.id}_timeseries.csv`
         a.click()
+        URL.revokeObjectURL(url)
       } else if (type === 'pdf') {
-        window.print()
+        // Generate standalone engineering PDF report
+        generatePdfReport()
       }
       setDownloading(null)
-    }, 600)
+    }, 300)
+  }
+
+  const generatePdfReport = () => {
+    const wallU = 1 / (scenario.envelope.wall_layers.reduce((s, l) => s + (l.thickness_mm / 1000) / (l.conductivity || 0.001), 0) + 0.17)
+    const roofU = 1 / (scenario.envelope.roof_layers.reduce((s, l) => s + (l.thickness_mm / 1000) / (l.conductivity || 0.001), 0) + 0.14)
+    const hasResults = Boolean(results && results.indoor_temp_c && results.indoor_temp_c.length > 0)
+    const meanIndoor = hasResults
+      ? (results.indoor_temp_c.reduce((a: number, b: number) => a + b, 0) / results.indoor_temp_c.length).toFixed(1)
+      : 'N/A'
+    const simStatus = hasResults ? 'SIMULATED' : 'PENDING'
+    const ansysDisplay = ansysStatus === 'UNAVAILABLE' ? 'ANSYS UNAVAILABLE' : (ansysStatus || 'NOT_RUN')
+    const valDisplay = validationDecision === 'VALIDATED' ? 'VALIDATED' : (validationDecision === 'UNAVAILABLE' ? 'UNAVAILABLE' : (validationDecision || 'PENDING'))
+
+    const htmlContent = `<!DOCTYPE html>
+<html lang="en"><head><meta charset="utf-8"><title>THERMASHELL Engineering Report — ${scenario.name}</title>
+<style>
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body { font-family: 'Segoe UI', -apple-system, sans-serif; color: #1a1a1a; padding: 40px 50px; font-size: 11pt; line-height: 1.6; }
+  h1 { font-size: 22pt; font-weight: 700; margin: 4px 0 8px; }
+  h2 { font-size: 14pt; font-weight: 600; border-bottom: 1px solid #ccc; padding-bottom: 6px; margin: 24px 0 12px; }
+  h3 { font-size: 12pt; font-weight: 600; margin: 16px 0 8px; }
+  table { width: 100%; border-collapse: collapse; margin: 8px 0 16px; font-size: 10pt; }
+  td, th { padding: 6px 10px; border-bottom: 1px solid #e0e0e0; text-align: left; }
+  th { background: #f5f5f5; font-weight: 600; font-size: 9pt; text-transform: uppercase; letter-spacing: 0.04em; }
+  .header { display: flex; justify-content: space-between; border-bottom: 2px solid #1a1a1a; padding-bottom: 16px; margin-bottom: 20px; }
+  .header-right { text-align: right; font-family: monospace; font-size: 9.5pt; }
+  .label { font-size: 9pt; color: #666; text-transform: uppercase; letter-spacing: 0.04em; }
+  .mono { font-family: 'Consolas', 'Courier New', monospace; }
+  .metrics-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; margin: 12px 0; }
+  .metric-card { padding: 10px; background: #f9f9f9; border-radius: 4px; }
+  .metric-value { font-size: 15pt; font-weight: 700; font-family: monospace; }
+  .status-badge { display: inline-block; padding: 2px 6px; font-size: 8pt; font-weight: 600; border-radius: 3px; background: #eee; margin-top: 2px; }
+  .footer { border-top: 2px solid #1a1a1a; padding-top: 16px; margin-top: 32px; display: flex; justify-content: space-between; font-size: 9pt; }
+  .sig-line { width: 180px; border-bottom: 1px solid #1a1a1a; margin-bottom: 6px; }
+  @media print { body { padding: 20px 30px; } }
+</style></head><body>
+<div class="header">
+  <div>
+    <div class="label" style="color: #c0392b; font-weight: 600; letter-spacing: 0.1em;">THERMASHELL ENGINEERING REPORT</div>
+    <h1>${scenario.name}</h1>
+    <div style="color: #666;">Site: ${scenario.location.name} (${scenario.location.latitude}°N, ${scenario.location.longitude}°E, ${scenario.location.elevation}m)</div>
+  </div>
+  <div class="header-right">
+    <div>Date: <strong>${new Date().toLocaleDateString('en-GB')}</strong></div>
+    <div>Ref: <strong>SIH26051-CERT</strong></div>
+    <div style="margin-top: 4px;">
+      <div>4R2C SOLVER: <strong style="color: ${hasResults ? '#27ae60' : '#999'}">${simStatus}</strong></div>
+      <div>ANSYS FLUENT: <strong style="color: ${ansysStatus === 'COMPLETED' ? '#27ae60' : ansysStatus === 'UNAVAILABLE' ? '#d35400' : '#7f8c8d'}">${ansysDisplay}</strong></div>
+      <div>CFD VALIDATION: <strong style="color: ${validationDecision === 'VALIDATED' ? '#27ae60' : validationDecision === 'UNAVAILABLE' ? '#d35400' : '#7f8c8d'}">${valDisplay}</strong></div>
+    </div>
+  </div>
+</div>
+
+${includeExecutive ? `<h2>1. Executive Summary</h2>
+${hasResults ? `<p>This technical assessment certifies the envelope performance for a ${scenario.geometry.length}m × ${scenario.geometry.width}m × ${scenario.geometry.height}m shelter designed for ${scenario.location.climate_zone} conditions at ${scenario.location.elevation}m altitude. Transient RC physics simulation indicates an auxiliary heating demand of <strong>${results.heat_balance?.heating_energy_kwh || 0} kWh</strong> over the ${results.simulation_hours || 72}-hour design period, maintaining comfort for <strong>${results.comfort?.comfort_percentage || 0}%</strong> of occupied hours.</p>` :
+`<p>No simulation has been executed. Run a simulation to compute energy demand and comfort metrics.</p>`}
+<div class="metrics-grid">
+  <div class="metric-card"><div class="label">Wall U-Value</div><div class="metric-value">${wallU.toFixed(2)} W/m²K</div></div>
+  <div class="metric-card"><div class="label">Roof U-Value</div><div class="metric-value">${roofU.toFixed(2)} W/m²K</div></div>
+  <div class="metric-card"><div class="label">Peak Heating</div><div class="metric-value">${hasResults ? ((results.peak_heating_load_w || 0) / 1000).toFixed(2) : 'N/A'} kW</div></div>
+  <div class="metric-card"><div class="label">Mean Indoor</div><div class="metric-value">${meanIndoor}°C</div></div>
+</div>` : ''}
+
+${includeClimate ? `<h2>2. Climate & Site Boundary Conditions</h2>
+<table>
+  <tr><td style="width:40%;color:#666;">Location & Coordinates</td><td class="mono"><strong>${scenario.location.name} (${scenario.location.latitude.toFixed(2)}°N, ${scenario.location.longitude.toFixed(2)}°E)</strong></td></tr>
+  <tr><td style="color:#666;">Site Elevation</td><td class="mono"><strong>${scenario.location.elevation} m ASL</strong></td></tr>
+  <tr><td style="color:#666;">Climate Classification</td><td class="mono"><strong>${scenario.location.climate_zone}</strong></td></tr>
+  <tr><td style="color:#666;">Meteorological Source</td><td class="mono"><strong>NASA POWER Surface Meteorology & Solar Point API</strong></td></tr>
+</table>` : ''}
+
+${includeEnvelope ? `<h2>3. Envelope Construction & Thermal Resistance</h2>
+<h3>Wall Construction Layers</h3>
+<table>
+  <tr><th>#</th><th>Material</th><th>Thickness (mm)</th><th>Conductivity (W/mK)</th><th>Density (kg/m³)</th></tr>
+  ${scenario.envelope.wall_layers.map((l, i) => `<tr><td>${i + 1}</td><td>${l.name}</td><td class="mono">${l.thickness_mm}</td><td class="mono">${l.conductivity}</td><td class="mono">${l.density}</td></tr>`).join('')}
+</table>
+<h3>Roof Construction Layers</h3>
+<table>
+  <tr><th>#</th><th>Material</th><th>Thickness (mm)</th><th>Conductivity (W/mK)</th><th>Density (kg/m³)</th></tr>
+  ${scenario.envelope.roof_layers.map((l, i) => `<tr><td>${i + 1}</td><td>${l.name}</td><td class="mono">${l.thickness_mm}</td><td class="mono">${l.conductivity}</td><td class="mono">${l.density}</td></tr>`).join('')}
+</table>` : ''}
+
+${includeSimulation && hasResults ? `<h2>4. Heat Balance & Dynamic Simulation</h2>
+<table>
+  <tr><th>Component</th><th>Energy (kWh)</th></tr>
+  <tr><td>Wall Conduction Loss</td><td class="mono">${results.heat_balance?.conduction_walls_kwh || 0}</td></tr>
+  <tr><td>Roof Conduction Loss</td><td class="mono">${results.heat_balance?.conduction_roof_kwh || 0}</td></tr>
+  <tr><td>Floor Conduction Loss</td><td class="mono">${results.heat_balance?.conduction_floor_kwh || 0}</td></tr>
+  <tr><td>Window Conduction Loss</td><td class="mono">${results.heat_balance?.conduction_windows_kwh || 0}</td></tr>
+  <tr><td>Solar Gain</td><td class="mono">${results.heat_balance?.solar_gain_kwh || 0}</td></tr>
+  <tr><td>Internal Gain</td><td class="mono">${results.heat_balance?.internal_gain_kwh || 0}</td></tr>
+  <tr><td>Ventilation Loss</td><td class="mono">${results.heat_balance?.ventilation_kwh || 0}</td></tr>
+  <tr style="font-weight:600;"><td>Auxiliary Heating</td><td class="mono">${results.heat_balance?.heating_energy_kwh || 0}</td></tr>
+</table>` : ''}
+
+${includeComfort && hasResults ? `<h2>5. Thermal Comfort & PMV Compliance</h2>
+<table>
+  <tr><td style="color:#666;">Comfort Hours</td><td class="mono"><strong>${results.comfort?.comfort_hours || 0} / ${results.comfort?.total_hours || 0} hours</strong></td></tr>
+  <tr><td style="color:#666;">Comfort Percentage</td><td class="mono"><strong>${results.comfort?.comfort_percentage || 0}%</strong></td></tr>
+  <tr><td style="color:#666;">Mean PMV</td><td class="mono"><strong>${results.comfort?.pmv_mean || 'N/A'}</strong></td></tr>
+  <tr><td style="color:#666;">Mean PPD</td><td class="mono"><strong>${results.comfort?.ppd_mean || 'N/A'}%</strong></td></tr>
+  <tr><td style="color:#666;">Operative Temp (mean)</td><td class="mono"><strong>${results.comfort?.operative_temp_mean_c || 'N/A'}°C</strong></td></tr>
+</table>` : ''}
+
+<div class="footer">
+  <div>
+    <div class="label">Engine Verification</div>
+    <div style="font-weight:600;">THERMASHELL Pure-Python Physics Engine v1.0</div>
+    <div style="color:#666;">ANSI/ASHRAE Standard 140 compliant solver</div>
+  </div>
+  <div style="text-align:right;">
+    <div class="sig-line"></div>
+    <div style="font-weight:600;">Authorized Engineer Signature</div>
+    <div style="color:#666;">SIH 2026 Innovation Team</div>
+  </div>
+</div>
+</body></html>`
+
+    // Open in a new window and print to PDF
+    const printWindow = window.open('', '_blank', 'width=900,height=700')
+    if (printWindow) {
+      printWindow.document.write(htmlContent)
+      printWindow.document.close()
+      // Allow content to render before printing
+      setTimeout(() => {
+        printWindow.print()
+      }, 400)
+    }
   }
 
   return (
@@ -187,9 +326,19 @@ export default function ReportPage() {
           <div style={{ textAlign: 'right', fontFamily: 'var(--font-mono)', fontSize: '0.8rem' }}>
             <div>Date: <strong>{new Date().toLocaleDateString('en-GB')}</strong></div>
             <div>Ref Code: <strong>SIH26051-CERT</strong></div>
-            <div style={{ color: 'var(--color-comfort-700)', fontWeight: 600, marginTop: '0.25rem' }}>
-              STATUS: VALIDATED
-            </div>
+            {(() => {
+              const hasResults = Boolean(results && results.indoor_temp_c && results.indoor_temp_c.length > 0)
+              const simStatus = hasResults ? 'SIMULATED' : 'PENDING'
+              const ansysDisplay = ansysStatus === 'UNAVAILABLE' ? 'ANSYS UNAVAILABLE' : (ansysStatus || 'NOT_RUN')
+              const valDisplay = validationDecision === 'VALIDATED' ? 'VALIDATED' : (validationDecision === 'UNAVAILABLE' ? 'UNAVAILABLE' : (validationDecision || 'PENDING'))
+              return (
+                <div style={{ marginTop: '0.35rem', lineHeight: 1.4 }}>
+                  <div>4R2C: <strong style={{ color: hasResults ? 'var(--color-comfort-700)' : 'var(--color-text-muted)' }}>{simStatus}</strong></div>
+                  <div>ANSYS: <strong style={{ color: ansysStatus === 'COMPLETED' ? 'var(--color-comfort-700)' : ansysStatus === 'UNAVAILABLE' ? 'var(--color-solar-700)' : 'var(--color-text-muted)' }}>{ansysDisplay}</strong></div>
+                  <div>VALIDATION: <strong style={{ color: validationDecision === 'VALIDATED' ? 'var(--color-comfort-700)' : validationDecision === 'UNAVAILABLE' ? 'var(--color-solar-700)' : 'var(--color-text-muted)' }}>{valDisplay}</strong></div>
+                </div>
+              )
+            })()}
           </div>
         </div>
 
@@ -317,6 +466,21 @@ export default function ReportPage() {
             <div style={{ fontSize: '0.8rem', fontWeight: 600 }}>Authorized Engineer Signature</div>
             <div style={{ fontSize: '0.75rem', color: 'var(--color-text-muted)' }}>SIH 2026 Innovation Team</div>
           </div>
+        </div>
+      </div>
+
+      {/* Sequential Workflow Navigation */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '1.5rem', borderTop: '1px solid var(--color-border)' }}>
+        <Link to="/validation" className="btn btn-outline" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
+          <ArrowLeft size={16} /> Back to Validation Suite
+        </Link>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '1rem' }}>
+          <span style={{ fontSize: '0.8125rem', color: 'var(--color-text-muted)' }}>
+            Stage 10 of 10 • Executive Dossier & Report Export
+          </span>
+          <Link to="/" className="btn btn-primary" style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', textDecoration: 'none' }}>
+            <RotateCcw size={15} /> Start New Project
+          </Link>
         </div>
       </div>
     </div>

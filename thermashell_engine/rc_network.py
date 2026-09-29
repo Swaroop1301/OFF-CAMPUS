@@ -139,8 +139,13 @@ def run_simulation(config: SimulationConfig) -> SimulationResult:
 
         # Parse timestamp for solar position
         try:
-            ts = datetime.fromisoformat(clim.timestamps[i].replace("Z", "+00:00"))
-        except (ValueError, IndexError):
+            ts_str = clim.timestamps[i].replace("Z", "+00:00")
+            if len(ts_str) == 10 and ts_str.isdigit():
+                # NASA POWER format YYYYMMDDHH
+                ts = datetime.strptime(ts_str, "%Y%m%d%H")
+            else:
+                ts = datetime.fromisoformat(ts_str)
+        except Exception:
             # Fallback: assume hourly from midnight
             ts = datetime(2024, 1, 15, i % 24, 0, 0)
 

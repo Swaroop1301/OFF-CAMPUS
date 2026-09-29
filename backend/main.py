@@ -22,6 +22,7 @@ from api.v1.router import api_router
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    settings.validate_mongodb()
     await init_db()
     yield
 

@@ -8,10 +8,9 @@ import numpy as np
 from typing import List, Dict, Any
 from datetime import datetime
 from fastapi import APIRouter, HTTPException, Depends
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from database import get_db
-from models import ValidationRun, ValidationMetric
 from thermashell_engine.types import (
     MaterialLayer, WallAssembly, ShelterGeometry, Envelope, ClimateTimeseries,
     SimulationConfig, Opening, RoofType, HVACMode
@@ -26,7 +25,7 @@ router = APIRouter()
 
 
 @router.get("/run")
-async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[str, Any]:
+async def run_analytical_validation(db: AsyncIOMotorDatabase = Depends(get_db)) -> Dict[str, Any]:
     """
     Executes real-time validation test cases against exact closed-form analytical solutions:
     1. Steady-state 1D Fourier multi-layer conduction
@@ -58,7 +57,7 @@ async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[
         "rmse": round(cond_err, 4),
         "bias": round(computed_r - analytical_r, 4),
         "r_squared": 1.0,
-        "status": "passed" if cond_err < 1e-3 else "failed",
+        "status": "validated" if cond_err < 1e-3 else "failed",
         "description": f"Verified exact multi-layer conduction: Analytical R={analytical_r:.4f}, Engine R={computed_r:.4f} m²K/W"
     })
 
@@ -77,7 +76,7 @@ async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[
         "rmse": round(rad_err, 4),
         "bias": round(computed_q_rad - analytical_q_rad, 4),
         "r_squared": 1.0,
-        "status": "passed" if rad_err < 0.05 else "failed",
+        "status": "validated" if rad_err < 0.05 else "failed",
         "description": f"Verified radiation: Analytical q={analytical_q_rad:.2f} W, Engine q={computed_q_rad:.2f} W"
     })
 
@@ -123,7 +122,7 @@ async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[
         "rmse": round(trans_rmse, 3),
         "bias": round(trans_mbe, 3),
         "r_squared": round(trans_r2, 4),
-        "status": "passed" if trans_mae < 0.20 else "failed",
+        "status": "validated" if trans_mae < 0.20 else "failed",
         "description": f"Verified numerical transient time integration: MAE={trans_mae:.3f}°C, R²={trans_r2:.4f}",
         "indoor_thermashell": [round(x, 2) for x in sim_hourly],
         "indoor_reference": [round(x, 2) for x in t_analytical],
@@ -152,7 +151,7 @@ async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[
         "rmse": round(pmv_err, 3),
         "bias": round(pmv_val - iso_expected_pmv, 3),
         "r_squared": 0.999,
-        "status": "passed" if pmv_err < 0.05 else "failed",
+        "status": "validated" if pmv_err < 0.05 else "failed",
         "description": f"Standard test point: ISO Expected PMV={iso_expected_pmv:.2f}, Computed PMV={pmv_val:.2f}, PPD={ppd_val:.1f}%"
     })
 
@@ -179,13 +178,13 @@ async def run_analytical_validation(db: AsyncSession = Depends(get_db)) -> Dict[
         "rmse": round(vent_err, 2),
         "bias": round(q_vent_computed - q_vent_analytical, 2),
         "r_squared": 1.0,
-        "status": "passed" if vent_err < 10.0 else "failed",
+        "status": "validated" if vent_err < 10.0 else "failed",
         "description": f"Verified ventilation transport: Analytical Q={q_vent_analytical:.1f}W, Computed Q={q_vent_computed:.1f}W"
     })
 
     return {
         "validation_timestamp": datetime.utcnow().isoformat(),
         "total_cases": len(results),
-        "all_passed": all(r["status"] == "passed" for r in results),
+        "all_passed": all(r["status"] == "validated" for r in results),
         "cases": results
     }

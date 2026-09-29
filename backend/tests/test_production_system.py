@@ -26,8 +26,7 @@ if backend_dir not in sys.path:
     sys.path.insert(0, backend_dir)
 
 from backend.main import app
-from database import init_db, async_session
-from models import Material, Project, Scenario
+from database import init_db
 from ansys_worker.runner import detect_ansys_environment
 from ansys_worker.geometry import ParametricShelterGeometry
 from ansys_worker.postprocess import FluentPostProcessor
@@ -147,7 +146,7 @@ def test_analytical_validation_suite(client):
     assert data["all_passed"] is True
     assert data["total_cases"] == 5
     for case in data["cases"]:
-        assert case["status"] == "passed"
+        assert case["status"] == "validated"
         assert case["mae"] >= 0
         assert case["r_squared"] >= 0.95
 

@@ -6,7 +6,7 @@ Provides real forward search, reverse geocoding, elevation lookup, and climate z
 from typing import List, Optional, Dict, Any
 from fastapi import APIRouter, Query, HTTPException, Depends
 from pydantic import BaseModel, Field
-from sqlalchemy.ext.asyncio import AsyncSession
+from motor.motor_asyncio import AsyncIOMotorDatabase
 
 from database import get_db
 from services.location_service import location_service, determine_climate_zone

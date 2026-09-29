@@ -1,4 +1,5 @@
 import { useScenarioStore } from '@/stores/appStore'
+import { Link } from 'react-router-dom'
 import { Users, Thermometer, Wind, Zap } from 'lucide-react'
 
 export default function OperatingConditionsPage() {
@@ -24,7 +25,7 @@ export default function OperatingConditionsPage() {
   }
 
   return (
-    <div style={{ maxWidth: '720px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '720px', margin: '0 auto', paddingBottom: '3rem' }}>
       <h1 style={{ fontFamily: 'var(--font-display)', fontSize: '1.75rem', fontWeight: 500, marginBottom: '0.25rem' }}>Operating Conditions</h1>
       <p style={{ color: 'var(--color-text-secondary)', fontSize: '0.875rem', marginBottom: '1.5rem' }}>
         Occupancy, HVAC mode, ventilation, and comfort targets
@@ -61,6 +62,16 @@ export default function OperatingConditionsPage() {
           <Field label="Natural Ventilation" value={op.ach_natural} unit=" ACH" onChange={(v: number) => updateOperating({ ach_natural: v })} min={0} max={10} step={0.1} icon={Wind} />
           <Field label="Infiltration" value={op.ach_infiltration} unit=" ACH" onChange={(v: number) => updateOperating({ ach_infiltration: v })} min={0} max={3} step={0.05} />
         </div>
+      </div>
+
+      {/* Sequential Navigation */}
+      <div style={{ marginTop: '2.5rem', display: 'flex', justifyContent: 'space-between', alignItems: 'center', borderTop: '1px solid var(--color-border-subtle)', paddingTop: '1.5rem' }}>
+        <Link to={`/scenario/${scenario.id}/envelope`} className="btn btn-outline" style={{ padding: '0.75rem 1.5rem' }}>
+          ← Back: Envelope
+        </Link>
+        <Link to={`/scenario/${scenario.id}/simulate`} className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
+          Next: Simulation Console →
+        </Link>
       </div>
     </div>
   )
