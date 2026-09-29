@@ -280,7 +280,7 @@ export const useSimulationStore = create<SimulationState>((set, get) => ({
 
     // Try WebSocket first, fall back to HTTP POST
     const wsProtocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
-    const wsUrl = `${wsProtocol}//${window.location.hostname}:${window.location.port}/api/v1/simulations/ws`
+    const wsUrl = `${wsProtocol}//${window.location.host}/api/v1/simulations/ws`
 
     let wsConnected = false
 
