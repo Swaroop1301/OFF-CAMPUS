@@ -1,4 +1,4 @@
-import { NavLink, useLocation } from 'react-router-dom'
+import { NavLink, useLocation, useParams } from 'react-router-dom'
 import { useUIStore } from '@/stores/appStore'
 import {
   LayoutDashboard, MapPin, Sun, Box, Layers, Wind, Thermometer,
@@ -6,34 +6,37 @@ import {
   Settings, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 
-const NAV_ITEMS = [
-  { section: 'OVERVIEW', items: [
-    { to: '/projects', icon: LayoutDashboard, label: 'Projects', color: 'var(--color-text-secondary)' },
-  ]},
-  { section: 'PIPELINE', items: [
-    { to: '/scenario/demo-leh-001', icon: MapPin, label: 'Site & Location', color: 'var(--color-climate-600)' },
-    { to: '/scenario/demo-leh-001/climate', icon: Sun, label: 'Climate Data', color: 'var(--color-climate-500)' },
-    { to: '/scenario/demo-leh-001/geometry', icon: Box, label: 'Geometry', color: 'var(--color-structure-500)' },
-    { to: '/scenario/demo-leh-001/materials', icon: Layers, label: 'Materials', color: 'var(--color-structure-600)' },
-    { to: '/scenario/demo-leh-001/envelope', icon: Layers, label: 'Envelope', color: 'var(--color-heat-500)' },
-    { to: '/scenario/demo-leh-001/operating', icon: Wind, label: 'Operating', color: 'var(--color-heat-600)' },
-  ]},
-  { section: 'ANALYSIS', items: [
-    { to: '/scenario/demo-leh-001/simulate', icon: Play, label: 'Simulate', color: 'var(--color-solar-600)' },
-    { to: '/scenario/demo-leh-001/results', icon: BarChart3, label: 'Results', color: 'var(--color-solar-500)' },
-    { to: '/compare', icon: GitCompare, label: 'Compare', color: 'var(--color-structure-500)' },
-    { to: '/optimize', icon: Target, label: 'Optimize', color: 'var(--color-comfort-600)' },
-    { to: '/scenario/demo-leh-001/validation', icon: CheckCircle2, label: 'Validation', color: 'var(--color-comfort-500)' },
-    { to: '/scenario/demo-leh-001/report', icon: FileText, label: 'Report', color: 'var(--color-text-secondary)' },
-  ]},
-  { section: '', items: [
-    { to: '/settings', icon: Settings, label: 'Settings', color: 'var(--color-text-muted)' },
-  ]},
-]
-
 export default function Sidebar() {
   const { sidebarCollapsed, toggleSidebar } = useUIStore()
   const location = useLocation()
+  const { id } = useParams<{ id: string }>()
+  
+  const currentId = id || ''
+
+  const NAV_ITEMS = [
+    { section: 'OVERVIEW', items: [
+      { to: '/projects', icon: LayoutDashboard, label: 'Projects', color: 'var(--color-text-secondary)' },
+    ]},
+    { section: 'PIPELINE', items: [
+      { to: `/scenario/${currentId}`, icon: MapPin, label: 'Site & Location', color: 'var(--color-climate-600)' },
+      { to: `/scenario/${currentId}/climate`, icon: Sun, label: 'Climate Data', color: 'var(--color-climate-500)' },
+      { to: `/scenario/${currentId}/geometry`, icon: Box, label: 'Geometry', color: 'var(--color-structure-500)' },
+      { to: `/scenario/${currentId}/materials`, icon: Layers, label: 'Materials', color: 'var(--color-structure-600)' },
+      { to: `/scenario/${currentId}/envelope`, icon: Layers, label: 'Envelope', color: 'var(--color-heat-500)' },
+      { to: `/scenario/${currentId}/operating`, icon: Wind, label: 'Operating', color: 'var(--color-heat-600)' },
+    ]},
+    { section: 'ANALYSIS', items: [
+      { to: `/scenario/${currentId}/simulate`, icon: Play, label: 'Simulate', color: 'var(--color-solar-600)' },
+      { to: `/scenario/${currentId}/results`, icon: BarChart3, label: 'Results', color: 'var(--color-solar-500)' },
+      { to: '/compare', icon: GitCompare, label: 'Compare', color: 'var(--color-structure-500)' },
+      { to: '/optimize', icon: Target, label: 'Optimize', color: 'var(--color-comfort-600)' },
+      { to: `/scenario/${currentId}/validation`, icon: CheckCircle2, label: 'Validation', color: 'var(--color-comfort-500)' },
+      { to: `/scenario/${currentId}/report`, icon: FileText, label: 'Report', color: 'var(--color-text-secondary)' },
+    ]},
+    { section: '', items: [
+      { to: '/settings', icon: Settings, label: 'Settings', color: 'var(--color-text-muted)' },
+    ]},
+  ]
 
   return (
     <aside style={{

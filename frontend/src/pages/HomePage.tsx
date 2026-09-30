@@ -427,7 +427,7 @@ export default function HomePage() {
           </p>
 
           <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-            <Link to="/scenario/demo-leh-001" className="btn btn-primary" style={{ padding: '0.75rem 2rem', fontSize: '0.9375rem' }}>
+            <Link to="/projects" className="btn btn-primary" style={{ padding: '0.75rem 2rem', fontSize: '0.9375rem' }}>
               Open Workspace <ArrowRight size={16} />
             </Link>
             <Link to="/projects" className="btn btn-outline" style={{ padding: '0.75rem 2rem', fontSize: '0.9375rem' }}>
@@ -485,7 +485,7 @@ export default function HomePage() {
               Start with the Leh Winter demo scenario or create your own project.
             </p>
             <div style={{ display: 'flex', gap: '1rem', justifyContent: 'center', flexWrap: 'wrap' }}>
-              <Link to="/scenario/demo-leh-001" className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
+              <Link to="/projects" className="btn btn-primary" style={{ padding: '0.75rem 2rem' }}>
                 Launch Demo Scenario <ArrowRight size={16} />
               </Link>
             </div>

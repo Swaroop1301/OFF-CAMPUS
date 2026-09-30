@@ -148,6 +148,7 @@ interface ScenarioState {
   updateOperating: (op: Partial<OperatingData>) => void
   setClimateData: (dataset_id: string | null, data: any | null) => void
   setScenarioName: (name: string) => void
+  setScenarioId: (id: string) => void
   applyPreset: (preset: string) => void
   resetScenario: () => void
 }
@@ -189,8 +190,8 @@ export const useScenarioStore = create<ScenarioState>()(
   persist(
     (set) => ({
       scenario: {
-        id: 'demo-leh-001',
-        name: 'Leh Winter High-Altitude Shelter',
+        id: '',
+        name: 'New Scenario',
         location: { ...DEFAULT_LOCATION },
         geometry: { ...DEFAULT_GEOMETRY },
         envelope: { ...DEFAULT_ENVELOPE },
@@ -210,6 +211,7 @@ export const useScenarioStore = create<ScenarioState>()(
       setClimateData: (dataset_id, data) =>
         set((s) => ({ scenario: { ...s.scenario, climate_dataset_id: dataset_id, climate_data: data, lastSaved: new Date().toISOString() } })),
       setScenarioName: (name) => set((s) => ({ scenario: { ...s.scenario, name } })),
+      setScenarioId: (id: string) => set((s) => ({ scenario: { ...s.scenario, id } })),
       applyPreset: (preset) => {
         const p = PRESETS[preset]
         if (p) set((s) => ({ scenario: { ...s.scenario, ...p, lastSaved: new Date().toISOString() } }))
@@ -217,7 +219,7 @@ export const useScenarioStore = create<ScenarioState>()(
       resetScenario: () =>
         set({
           scenario: {
-            id: 'demo-leh-001', name: 'Leh Winter High-Altitude Shelter',
+            id: '', name: 'New Scenario',
             location: { ...DEFAULT_LOCATION }, geometry: { ...DEFAULT_GEOMETRY },
             envelope: { ...DEFAULT_ENVELOPE }, operating: { ...DEFAULT_OPERATING },
             climate_dataset_id: null, climate_data: null,

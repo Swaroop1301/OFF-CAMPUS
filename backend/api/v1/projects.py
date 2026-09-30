@@ -85,6 +85,7 @@ async def list_projects(db: AsyncIOMotorDatabase = Depends(get_db)):
         created_at = p.get("created_at")
         output.append({
             "id": p["id"],
+            "scenario_id": scen["id"] if scen else None,
             "name": p["name"],
             "description": p.get("description"),
             "location": loc_data,

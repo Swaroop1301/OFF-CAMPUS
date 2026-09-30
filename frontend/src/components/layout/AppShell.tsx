@@ -1,12 +1,20 @@
-import { Outlet } from 'react-router-dom'
+import { Outlet, useParams } from 'react-router-dom'
 import { useEffect, useRef } from 'react'
 import Sidebar from './Sidebar'
 import PipelineBreadcrumb from './PipelineBreadcrumb'
-import { useUIStore } from '@/stores/appStore'
+import { useUIStore, useScenarioStore } from '@/stores/appStore'
 
 export default function AppShell() {
   const { scrollProgress, setScrollProgress, sidebarCollapsed } = useUIStore()
+  const { scenario, setScenarioId } = useScenarioStore()
+  const { id } = useParams<{ id: string }>()
   const mainRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (id && scenario.id !== id) {
+      setScenarioId(id)
+    }
+  }, [id, scenario.id, setScenarioId])
 
   useEffect(() => {
     const el = mainRef.current

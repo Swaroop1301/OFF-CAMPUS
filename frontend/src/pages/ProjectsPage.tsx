@@ -5,6 +5,7 @@ import { Plus, Thermometer, MapPin, Clock, MoreHorizontal, RefreshCw, X, CheckCi
 
 interface ProjectItem {
   id: string
+  scenario_id?: string
   name: string
   description?: string
   location?: {
@@ -155,7 +156,7 @@ export default function ProjectsPage() {
             animate={{ opacity: 1, y: 0 }}
             transition={{ delay: i * 0.05, duration: 0.3 }}
           >
-            <Link to={`/scenario/${project.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
+            <Link to={`/scenario/${project.scenario_id || project.id}`} style={{ textDecoration: 'none', color: 'inherit' }}>
               <div className="card" style={{ display: 'grid', gridTemplateColumns: '1fr auto', gap: '1rem', cursor: 'pointer', padding: '1.25rem 1.5rem' }}>
                 <div>
                   <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', marginBottom: '0.375rem' }}>
