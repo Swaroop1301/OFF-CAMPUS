@@ -15,7 +15,8 @@ import {
   RefreshCw,
   Info,
   ArrowLeft,
-  ArrowRight
+  ArrowRight,
+  AlertTriangle
 } from 'lucide-react'
 import { useScenarioStore } from '@/stores/appStore'
 
@@ -48,11 +49,13 @@ export default function OptimizePage() {
   // Engine state
   const [isRunningEngine, setIsRunningEngine] = useState(false)
   const [engineResults, setEngineResults] = useState<any>(null)
+  const [engineError, setEngineError] = useState<string | null>(null)
   const [dataSource, setDataSource] = useState<'local' | 'engine'>('local')
 
   // Run real optimization via backend API
   const runEngineOptimization = async () => {
     setIsRunningEngine(true)
+    setEngineError(null)
     try {
       const totalW = energyWeight + comfortWeight + costWeight || 1
       const payload = {
@@ -103,12 +106,18 @@ export default function OptimizePage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload),
       })
-      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+      
+      if (!res.ok) {
+        const errData = await res.json().catch(() => null)
+        throw new Error(errData?.detail || `HTTP ${res.status}`)
+      }
+      
       const data = await res.json()
       setEngineResults(data)
       setDataSource('engine')
-    } catch (err) {
+    } catch (err: any) {
       console.error('Engine optimization failed:', err)
+      setEngineError(err.message || 'Failed to run optimization sweep.')
     }
     setIsRunningEngine(false)
   }
@@ -185,6 +194,20 @@ export default function OptimizePage() {
           </button>
         </div>
       </div>
+
+      {engineError && (
+        <div className="banner banner-warning" style={{ marginBottom: '2rem' }}>
+          <AlertTriangle size={16} /> 
+          <div>
+            <strong>Optimization Engine Error:</strong> {engineError}
+            {engineError.includes('climate dataset') && (
+              <div style={{ marginTop: '0.25rem', fontSize: '0.85rem' }}>
+                Please go back to the Climate Data step and ensure meteorological data is fetched for this scenario.
+              </div>
+            )}
+          </div>
+        </div>
+      )}
 
       {/* Top Section: Weight Sliders & Constraints */}
       <div 
