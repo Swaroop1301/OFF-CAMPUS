@@ -57,8 +57,13 @@ async def create_ansys_job(
     Creates an ANSYS Fluent CFD job.
     Kicks off worker execution asynchronously without blocking the web server.
     """
-    # Verify scenario exists
-    scen = await db.scenarios.find_one({"id": req.scenario_id})
+    # Verify scenario exists (or fallback to project_id for legacy projects)
+    scen = await db.scenarios.find_one({
+        "$or": [
+            {"id": req.scenario_id},
+            {"project_id": req.scenario_id}
+        ]
+    })
     if not scen:
         raise HTTPException(status_code=404, detail=f"Scenario '{req.scenario_id}' not found.")
 
